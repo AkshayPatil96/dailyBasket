@@ -1,5 +1,7 @@
 export type Role = 'CUSTOMER' | 'DELIVERY_PARTNER' | 'ADMIN';
 
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
 
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
@@ -8,10 +10,15 @@ export type DeliveryStatus = 'ASSIGNED' | 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERE
 
 export interface User {
   id: string;
+  firstName: string;
+  lastName: string;
   email: string;
-  fullName: string;
+  emailVerifiedAt?: string | null;
   phone?: string | null;
+  phoneVerifiedAt?: string | null;
+  profileImageUrl?: string | null;
   role: Role;
+  status: UserStatus;
   createdAt: string;
 }
 

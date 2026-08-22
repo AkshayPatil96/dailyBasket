@@ -1,22 +1,32 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
 
   async sendVerificationEmail(to: string, firstName: string, verifyUrl: string): Promise<void> {
+    const safeName = escapeHtml(firstName);
     await this.send({
       to,
       subject: 'Verify your email — DailyBasket',
-      html: `<p>Hi ${firstName},</p><p>Confirm your email to activate your account:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`
+      html: `<p>Hi ${safeName},</p><p>Confirm your email to activate your account:</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`
     });
   }
 
   async sendPasswordResetEmail(to: string, firstName: string, resetUrl: string): Promise<void> {
+    const safeName = escapeHtml(firstName);
     await this.send({
       to,
       subject: 'Reset your password — DailyBasket',
-      html: `<p>Hi ${firstName},</p><p>Reset your password using the link below:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>`
+      html: `<p>Hi ${safeName},</p><p>Reset your password using the link below:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>`
     });
   }
 

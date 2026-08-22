@@ -36,7 +36,7 @@ apps/api/    NestJS (Express adapter), prefix /api/v1, Socket.IO gateway at /soc
 packages/types/       shared TS interfaces (mirrors Prisma models, not generated from them)
 packages/validation/  shared Zod schemas
 packages/config/      shared constants (roles, order status, route paths)
-packages/utils/       currency/date formatting, snake_case<->camelCase converters
+packages/utils/       currency/date formatting, slugify
 infrastructure/       Dockerfiles + nginx reverse-proxy config
 ```
 
@@ -95,7 +95,7 @@ When implementing any of these domains, extend the schema to match the relevant 
 
 ## API JSON convention
 
-DB columns are `snake_case` (via Prisma `@map`), TS/Kotlin-style code is `camelCase`. `apps/web/src/lib/api-client.ts` already assumes the wire format is `snake_case` (it converts both directions with `packages/utils`'s `toSnakeCase`/`toCamelCase`). NestJS does not do this conversion automatically the way Jackson does on a Kotlin stack — when DTOs/serializers are added to `apps/api`, either apply a consistent snake_case naming strategy (global interceptor or per-field `@Expose({ name: '...' })`) or the two ends will silently disagree. Don't leave this half-done — pick the approach and apply it everywhere, not endpoint-by-endpoint.
+`camelCase` end to end — HTTP request/response bodies, DTOs, and TS code all use `camelCase`. Only the Postgres columns are `snake_case`, via Prisma's `@map` on each field; Prisma is the sole translation point. There is no request/response case-conversion layer (no middleware, no interceptor) — a prior version of this had one (mimicking the snake_case-JSON convention from this team's Kotlin/Jackson stack) and it was deliberately removed since frontend and backend are both TS/first-party here, so there's no cross-language reason to translate the wire format. Don't reintroduce one.
 
 ## Git / commits
 

@@ -2,11 +2,11 @@ import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 
 export class RegisterDto {
   @IsString()
-  @MinLength(1, { message: 'first_name is required' })
+  @MinLength(1, { message: 'firstName is required' })
   firstName: string;
 
   @IsString()
-  @MinLength(1, { message: 'last_name is required' })
+  @MinLength(1, { message: 'lastName is required' })
   lastName: string;
 
   @IsEmail({}, { message: 'email must be a valid email' })

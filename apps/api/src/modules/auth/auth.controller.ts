@@ -8,7 +8,7 @@ import {
   Req,
   Res,
   UnauthorizedException,
-  UseGuards
+  UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
@@ -40,8 +40,15 @@ export class AuthController {
   @Post('login')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  async login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    const { user, tokens } = await this.authService.login(dto, req.headers['user-agent'] ?? 'unknown');
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { user, tokens } = await this.authService.login(
+      dto,
+      req.headers['user-agent'] ?? 'unknown',
+    );
     this.setAuthCookies(res, tokens);
     return user;
   }
@@ -49,12 +56,18 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const refreshToken = req.cookies?.[REFRESH_COOKIE] as string | undefined;
     if (!refreshToken) {
       throw new UnauthorizedException('No active session');
     }
-    const tokens = await this.authService.refresh(refreshToken, req.headers['user-agent'] ?? 'unknown');
+    const tokens = await this.authService.refresh(
+      refreshToken,
+      req.headers['user-agent'] ?? 'unknown',
+    );
     this.setAuthCookies(res, tokens);
     return { success: true };
   }
@@ -62,7 +75,10 @@ export class AuthController {
   @Post('logout')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
-  async logout(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) res: Response) {
+  async logout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     await this.authService.logout(user.sessionId, user.id);
     this.clearAuthCookies(res);
     return { success: true };
@@ -71,7 +87,10 @@ export class AuthController {
   @Post('logout-all')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
-  async logoutAll(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) res: Response) {
+  async logoutAll(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     await this.authService.logoutAll(user.id);
     this.clearAuthCookies(res);
     return { success: true };
@@ -95,7 +114,11 @@ export class AuthController {
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   async resendVerification(@Body() dto: EmailOnlyDto) {
     await this.authService.resendVerification(dto.email);
-    return { success: true, message: 'If that email is registered, a verification link has been sent.' };
+    return {
+      success: true,
+      message:
+        'If that email is registered, a verification link has been sent.',
+    };
   }
 
   @Post('forgot-password')
@@ -103,7 +126,11 @@ export class AuthController {
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   async forgotPassword(@Body() dto: EmailOnlyDto) {
     await this.authService.forgotPassword(dto.email);
-    return { success: true, message: 'If that email is registered, a password reset link has been sent.' };
+    return {
+      success: true,
+      message:
+        'If that email is registered, a password reset link has been sent.',
+    };
   }
 
   @Post('reset-password')
@@ -117,18 +144,30 @@ export class AuthController {
   @Post('change-password')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
-  async changePassword(@CurrentUser() user: AuthenticatedUser, @Body() dto: ChangePasswordDto) {
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
     if (dto.currentPassword === dto.newPassword) {
-      throw new BadRequestException('New password must be different from the current password');
+      throw new BadRequestException(
+        'New password must be different from the current password',
+      );
     }
-    await this.authService.changePassword(user.id, dto.currentPassword, dto.newPassword);
+    await this.authService.changePassword(
+      user.id,
+      dto.currentPassword,
+      dto.newPassword,
+    );
     return { success: true };
   }
 
   @Post('account/delete')
   @HttpCode(200)
   @UseGuards(JwtAuthGuard)
-  async deleteAccount(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) res: Response) {
+  async deleteAccount(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     await this.authService.deleteAccount(user.id);
     this.clearAuthCookies(res);
     return { success: true };
@@ -140,14 +179,17 @@ export class AuthController {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'lax',
-      maxAge: parseDurationSeconds(process.env.JWT_ACCESS_EXPIRES_IN ?? '15m') * 1000
+      maxAge:
+        parseDurationSeconds(process.env.JWT_ACCESS_EXPIRES_IN ?? '15m') * 1000,
     });
     res.cookie(REFRESH_COOKIE, tokens.refreshToken, {
       httpOnly: true,
       secure: isProduction,
       sameSite: 'lax',
       path: '/api/v1/auth',
-      maxAge: parseDurationSeconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') * 1000
+      maxAge:
+        parseDurationSeconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d') *
+        1000,
     });
   }
 

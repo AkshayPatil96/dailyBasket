@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { RedisService } from '../../redis/redis.service';
 import { parseDurationSeconds } from '../../common/utils/duration';
+import { ConfigService } from '@nestjs/config';
 
 interface SessionRecord {
   userId: string;
@@ -23,17 +24,39 @@ const userSessionsKey = (userId: string) => `user_sessions:${userId}`;
 @Injectable()
 export class SessionService {
   private readonly logger = new Logger(SessionService.name);
-  private readonly ttlSeconds = parseDurationSeconds(process.env.JWT_REFRESH_EXPIRES_IN ?? '30d');
+  private readonly ttlSeconds: number;
 
-  constructor(private readonly redis: RedisService) {}
+  constructor(
+    private readonly redis: RedisService,
+    private readonly configService: ConfigService,
+  ) {
+    this.ttlSeconds = parseDurationSeconds(
+      this.configService.getOrThrow<string>('jwt.refreshExpiresIn'),
+    );
+  }
 
-  async createSession(userId: string, userAgent: string): Promise<{ sessionId: string; jti: string }> {
+  async createSession(
+    userId: string,
+    userAgent: string,
+  ): Promise<{ sessionId: string; jti: string }> {
     const sessionId = randomUUID();
     const jti = randomUUID();
     const now = new Date().toISOString();
-    const record: SessionRecord = { userId, currentJti: jti, previousJti: null, userAgent, createdAt: now, lastUsedAt: now };
+    const record: SessionRecord = {
+      userId,
+      currentJti: jti,
+      previousJti: null,
+      userAgent,
+      createdAt: now,
+      lastUsedAt: now,
+    };
 
-    await this.redis.set(sessionKey(sessionId), JSON.stringify(record), 'EX', this.ttlSeconds);
+    await this.redis.set(
+      sessionKey(sessionId),
+      JSON.stringify(record),
+      'EX',
+      this.ttlSeconds,
+    );
     await this.redis.sadd(userSessionsKey(userId), sessionId);
     await this.redis.expire(userSessionsKey(userId), this.ttlSeconds);
 
@@ -46,17 +69,29 @@ export class SessionService {
       return { status: 'invalid' };
     }
 
-    const record: SessionRecord = JSON.parse(raw);
+    const record = JSON.parse(raw) as SessionRecord;
 
     if (record.currentJti === presentedJti) {
       const newJti = randomUUID();
-      const updated: SessionRecord = { ...record, previousJti: record.currentJti, currentJti: newJti, lastUsedAt: new Date().toISOString() };
-      await this.redis.set(sessionKey(sessionId), JSON.stringify(updated), 'EX', this.ttlSeconds);
+      const updated: SessionRecord = {
+        ...record,
+        previousJti: record.currentJti,
+        currentJti: newJti,
+        lastUsedAt: new Date().toISOString(),
+      };
+      await this.redis.set(
+        sessionKey(sessionId),
+        JSON.stringify(updated),
+        'EX',
+        this.ttlSeconds,
+      );
       return { status: 'rotated', userId: record.userId, newJti };
     }
 
     if (record.previousJti === presentedJti) {
-      this.logger.warn(`Refresh token reuse detected for session ${sessionId} (user ${record.userId}) — revoking session`);
+      this.logger.warn(
+        `Refresh token reuse detected for session ${sessionId} (user ${record.userId}) — revoking session`,
+      );
       await this.revoke(sessionId, record.userId);
       return { status: 'reused', userId: record.userId };
     }

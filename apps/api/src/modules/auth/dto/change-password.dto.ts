@@ -3,9 +3,9 @@ import { IsString, MinLength } from 'class-validator';
 export class ChangePasswordDto {
   @IsString()
   @MinLength(1, { message: 'currentPassword is required' })
-  currentPassword: string;
+  currentPassword!: string;
 
   @IsString()
   @MinLength(8, { message: 'newPassword must be at least 8 characters' })
-  newPassword: string;
+  newPassword!: string;
 }

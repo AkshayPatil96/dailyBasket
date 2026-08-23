@@ -4,7 +4,36 @@ Operating instructions for coding agents (Claude Code and others) working in thi
 
 ## Project
 
-Grocery delivery platform. pnpm + Turborepo monorepo: one Next.js app serving customer/admin/delivery web UIs, one NestJS API, shared TS packages. Full stack rationale lives in the sibling planning docs one level up (`../grocery-delivery-tech-stack.md`, `../grocery-delivery-authentication-architecture.md`, `../dailybasket-cart-architecture.md`, `../dailybasket-checkout-architecture.md`, `../grocery-delivery-product-catalog-architecture.md`, `../dailybasket-address-location-architecture.md`) — these are outside the git repo but are the source of truth for domain decisions. Read the relevant one before implementing that domain.
+Grocery delivery platform built with pnpm + Turborepo monorepo:
+
+- One Next.js app serving customer, admin, and delivery web UIs
+- One NestJS API
+- Shared TypeScript packages
+
+Architecture and domain decisions are documented in Markdown files located in:
+../main-docs/
+
+The `../main-docs/` directory is outside the git repository and is the source of truth for the project.
+
+IMPORTANT:
+
+- Before implementing, modifying, refactoring, or making architectural decisions for any domain, ALWAYS check `../main-docs/` for the relevant documentation first.
+- Do not assume the existing code is the source of truth when a corresponding document exists.
+- If the relevant documentation exists, follow its decisions and constraints.
+- If the documentation conflicts with the existing implementation, treat the documentation as authoritative and identify the discrepancy before making changes.
+- If no relevant documentation exists, proceed using the project's established patterns and explicitly note that the domain is not covered by the planning documentation.
+- When a change introduces or materially changes an architectural/domain decision, update the relevant Markdown document in `../main-docs/` as part of the work.
+
+Relevant planning documents may include, but are not limited to:
+
+- `../main-docs/grocery-delivery-tech-stack.md`
+- `../main-docs/grocery-delivery-authentication-architecture.md`
+- `../main-docs/dailybasket-cart-architecture.md`
+- `../main-docs/dailybasket-checkout-architecture.md`
+- `../main-docs/grocery-delivery-product-catalog-architecture.md`
+- `../main-docs/dailybasket-address-location-architecture.md`
+
+Do not hardcode this list as the complete set of documentation. Always inspect `../main-docs/` when determining whether relevant planning documentation exists.
 
 ## Commands
 
@@ -44,7 +73,7 @@ Route split is deliberate: one Next.js deployment serves all three surfaces (cus
 
 ## Backend layering
 
-`apps/api/src/modules/<domain>/` is `Module + Controller + Service`, one per domain (auth, users, products, categories, cart, orders, payments, inventory, delivery, coupons, notifications, admin) — currently stubs. There is no separate Repository layer: `PrismaService` (global, from `src/prisma/`) is injected directly into Services and *is* the repository layer. Don't add a repository abstraction on top of Prisma — it isn't justified here.
+`apps/api/src/modules/<domain>/` is `Module + Controller + Service`, one per domain (auth, users, products, categories, cart, orders, payments, inventory, delivery, coupons, notifications, admin) — currently stubs. There is no separate Repository layer: `PrismaService` (global, from `src/prisma/`) is injected directly into Services and _is_ the repository layer. Don't add a repository abstraction on top of Prisma — it isn't justified here.
 
 Controllers stay thin: parse input, call the Service, return. Business logic, transactions, and all Prisma calls belong in the Service.
 

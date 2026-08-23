@@ -15,8 +15,8 @@ import type { LoginDto } from './dto/login.dto';
 import { ConfigService } from '@nestjs/config';
 
 const SALT_ROUNDS = 12;
-const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
-const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const hashToken = (token: string) =>
   createHash('sha256').update(token).digest('hex');

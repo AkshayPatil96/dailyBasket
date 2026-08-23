@@ -10,6 +10,17 @@ const escapeHtml = (value: string): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+interface ResendEmailSender {
+  send(message: {
+    from: string;
+    to: string;
+    subject: string;
+    html: string;
+  }): Promise<{
+    error: { name: string; message: string } | null;
+  }>;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -39,7 +50,9 @@ export class EmailService {
 
     const fromEmail = this.configService.getOrThrow<string>('resend.fromEmail');
 
-    const { error } = await this.resendService.send({
+    const resendEmailSender = this
+      .resendService as unknown as ResendEmailSender;
+    const { error } = await resendEmailSender.send({
       from: fromEmail,
       to: message.to,
       subject: message.subject,

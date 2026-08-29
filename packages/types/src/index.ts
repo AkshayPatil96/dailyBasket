@@ -1,4 +1,4 @@
-export type Role = 'CUSTOMER' | 'DELIVERY_PARTNER' | 'ADMIN';
+export type Role = 'CUSTOMER' | 'DELIVERY_PARTNER' | 'ADMIN' | 'SUPER_ADMIN';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
@@ -19,40 +19,124 @@ export interface User {
   profileImageUrl?: string | null;
   role: Role;
   status: UserStatus;
+  isSystem: boolean;
   createdAt: string;
 }
+
+export type AddressLabel = 'HOME' | 'WORK' | 'OTHER';
 
 export interface Address {
   id: string;
   userId: string;
-  label: string;
+  label: AddressLabel;
+  recipientName: string;
+  phone: string;
   line1: string;
   line2?: string | null;
+  landmark?: string | null;
   city: string;
   state: string;
+  country: string;
   postalCode: string;
   latitude?: number | null;
   longitude?: number | null;
+  formattedAddress?: string | null;
   isDefault: boolean;
+  createdAt: string;
 }
+
+export type CategoryStatus = 'ACTIVE' | 'INACTIVE';
+export type ProductStatus = 'DRAFT' | 'ACTIVE' | 'INACTIVE' | 'ARCHIVED';
+export type VariantStatus = 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
+export type Unit = 'KG' | 'G' | 'L' | 'ML' | 'PIECE' | 'PACK' | 'DOZEN';
+export type DietaryTag = 'VEGETARIAN' | 'VEGAN' | 'ORGANIC' | 'GLUTEN_FREE' | 'SUGAR_FREE';
 
 export interface Category {
   id: string;
-  name: string;
-  slug: string;
-  imageUrl?: string | null;
-}
-
-export interface Product {
-  id: string;
-  categoryId: string;
+  parentId?: string | null;
   name: string;
   slug: string;
   description?: string | null;
-  price: number;
-  unit: string;
   imageUrl?: string | null;
-  isActive: boolean;
+  sortOrder: number;
+  status: CategoryStatus;
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface CategoryTreeNode extends Category {
+  children: CategoryTreeNode[];
+}
+
+export interface ProductImage {
+  id: string;
+  productId: string;
+  url: string;
+  altText?: string | null;
+  sortOrder: number;
+  isPrimary: boolean;
+}
+
+export interface ProductVariant {
+  id: string;
+  productId: string;
+  skuCode: string;
+  barcode?: string | null;
+  label: string;
+  quantity: number;
+  unit: Unit;
+  /** Prisma Decimal — serialized as a string over JSON, not a number. */
+  price: string;
+  compareAtPrice?: string | null;
+  status: VariantStatus;
+}
+
+export interface CategoryBrief {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/** Card shape returned by POST /products/list — one cheapest active variant, one primary image. */
+export interface ProductSummary {
+  id: string;
+  categoryId: string;
+  /** Plain optional label, not a managed entity — see AGENTS.md. */
+  brand?: string | null;
+  name: string;
+  slug: string;
+  description?: string | null;
+  countryOfOrigin?: string | null;
+  dietaryInfo: DietaryTag[];
+  status: ProductStatus;
+  isFeatured: boolean;
+  category: CategoryBrief;
+  images: ProductImage[];
+  variants: ProductVariant[];
+  createdAt: string;
+}
+
+/** Full shape returned by GET /products?slug= — all active variants, all images, full category. */
+export interface ProductDetail {
+  id: string;
+  categoryId: string;
+  brand?: string | null;
+  name: string;
+  slug: string;
+  description?: string | null;
+  ingredients?: string | null;
+  nutritionalInfo?: Record<string, unknown> | null;
+  dietaryInfo: DietaryTag[];
+  countryOfOrigin?: string | null;
+  status: ProductStatus;
+  isFeatured: boolean;
+  isSystem: boolean;
+  category: Category;
+  images: ProductImage[];
+  variants: ProductVariant[];
+  createdAt: string;
+  updatedAt?: string | null;
 }
 
 export interface OrderItem {
@@ -91,4 +175,12 @@ export interface PaginatedResponse<T> {
   offset: number;
   limit: number;
   hasMore: boolean;
+}
+
+/** Single aggregated payload for GET /home — one round trip for the whole homepage. */
+export interface HomepageData {
+  categories: CategoryTreeNode[];
+  popularProducts: ProductSummary[];
+  featuredProducts: ProductSummary[];
+  deals: ProductSummary[];
 }

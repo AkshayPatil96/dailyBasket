@@ -52,10 +52,7 @@ describe('SessionService', () => {
 
   describe('createSession', () => {
     it('stores a session record and adds it to the user set', async () => {
-      const { sessionId, jti } = await service.createSession(
-        'user-1',
-        'jest',
-      );
+      const { sessionId, jti } = await service.createSession('user-1', 'jest');
 
       expect(sessionId).toEqual(expect.any(String));
       expect(jti).toEqual(expect.any(String));

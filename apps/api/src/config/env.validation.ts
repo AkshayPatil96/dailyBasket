@@ -23,6 +23,8 @@ export const envSchema = z.object({
 
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
 
+  VISITOR_DATA_TTL_DAYS: z.coerce.number().int().positive().default(30),
+
   // ─────────────────────────────────────
   // Database - Neon PostgreSQL
   // ─────────────────────────────────────
@@ -104,6 +106,11 @@ export const envSchema = z.object({
   ),
 
   AWS_S3_BUCKET: z.preprocess(emptyStringToUndefined, z.string().optional()),
+
+  AWS_CLOUDFRONT_URL: z.preprocess(
+    emptyStringToUndefined,
+    z.string().optional(),
+  ),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -94,7 +94,9 @@ describe('AuthService', () => {
       sendVerificationEmail: jest.fn(),
       sendPasswordResetEmail: jest.fn(),
     };
-    configService = { getOrThrow: jest.fn().mockReturnValue('https://app.local') };
+    configService = {
+      getOrThrow: jest.fn().mockReturnValue('https://app.local'),
+    };
 
     service = new AuthService(
       prisma as unknown as PrismaService,
@@ -263,10 +265,7 @@ describe('AuthService', () => {
       await expect(service.refresh('token', 'jest')).rejects.toBeInstanceOf(
         UnauthorizedException,
       );
-      expect(sessionService.revoke).toHaveBeenCalledWith(
-        'session-1',
-        'user-1',
-      );
+      expect(sessionService.revoke).toHaveBeenCalledWith('session-1', 'user-1');
     });
 
     it('issues a fresh token pair on a valid rotation', async () => {
@@ -299,10 +298,7 @@ describe('AuthService', () => {
   describe('logout / logoutAll', () => {
     it('revokes a single session', async () => {
       await service.logout('session-1', 'user-1');
-      expect(sessionService.revoke).toHaveBeenCalledWith(
-        'session-1',
-        'user-1',
-      );
+      expect(sessionService.revoke).toHaveBeenCalledWith('session-1', 'user-1');
     });
 
     it('revokes every session for the user', async () => {

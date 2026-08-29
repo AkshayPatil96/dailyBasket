@@ -1,6 +1,7 @@
 import { Leaf } from "lucide-react";
 import { AuthBrandPanel } from "@/components/auth/auth-brand-panel";
 import { GuestGuard } from "@/components/auth/guest-guard";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 export default function AuthLayout({
   children,
@@ -25,10 +26,7 @@ export default function AuthLayout({
             </span>
           </div>
 
-          <div className="">
-            {/* TODO: Add Theme Toggle */}
-            Theme Toggle
-          </div>
+          <ThemeToggle />
         </div>
         <div className="w-full max-w-md flex flex-col gap-8 animate-fade-slide-up self-center">
           <GuestGuard>{children}</GuestGuard>

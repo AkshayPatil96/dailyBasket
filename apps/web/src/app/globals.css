@@ -34,6 +34,11 @@
   --radius: 0.75rem;
   --radius-outer: 1.5rem;
   --radius-inner: 0.75rem;
+
+  /* Single source of truth for SiteHeader's rendered height — anything that
+     sticks below the header (e.g. the category sidebar rail) offsets by this
+     instead of a second hardcoded pixel value that could drift out of sync. */
+  --header-height: 4.3125rem;
 }
 
 @theme inline {
@@ -77,43 +82,53 @@
   --font-display: var(--font-heading);
 }
 
-/* @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #f4f4f5;
+/* Toggled by next-themes via a `dark` class on <html> (attribute="class") —
+   not a `prefers-color-scheme` media query, so the toggle can override the OS. */
+.dark {
+  --background: #09090b;
+  --foreground: #f4f4f5;
 
-    --primary: #10b981;
-    --primary-hover: #34d399;
-    --primary-foreground: #052e1f;
+  --primary: #10b981;
+  --primary-hover: #34d399;
+  --primary-foreground: #052e1f;
 
-    --secondary: #18181b;
-    --secondary-foreground: #f4f4f5;
+  --secondary: #18181b;
+  --secondary-foreground: #f4f4f5;
 
-    --accent: #f59e0b;
-    --accent-foreground: #451a03;
+  --accent: #f59e0b;
+  --accent-foreground: #451a03;
 
-    --muted: #18181b;
-    --muted-foreground: #a1a1aa;
+  --muted: #18181b;
+  --muted-foreground: #a1a1aa;
 
-    --destructive: #f87171;
-    --destructive-foreground: #450a0a;
+  --destructive: #f87171;
+  --destructive-foreground: #450a0a;
 
-    --border: #27272a;
-    --input: #27272a;
-    --ring: #10b981;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #10b981;
 
-    --card: #131316;
-    --card-foreground: #f4f4f5;
+  --card: #131316;
+  --card-foreground: #f4f4f5;
 
-    --popover: #131316;
-    --popover-foreground: #f4f4f5;
-  }
-} */
+  --popover: #131316;
+  --popover-foreground: #f4f4f5;
+}
 
 body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+}
+
+@layer base {
+  .container {
+    /* @apply mx-auto w-full max-w-6xl border border-red-500!; */
+    width: 100%; /* Takes up full width on small screens */
+    max-width: 1200px; /* Prevents the container from scaling past 1200px */
+    margin: 0 auto; /* Centers the container horizontally on the screen */
+    padding: 0 20px; /* Adds breathing room on mobile edges */
+  }
 }
 
 @keyframes fade-slide-up {

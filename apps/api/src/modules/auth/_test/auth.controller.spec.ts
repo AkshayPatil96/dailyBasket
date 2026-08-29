@@ -101,7 +101,10 @@ describe('AuthController', () => {
   describe('refresh', () => {
     it('rejects when there is no refresh cookie', async () => {
       await expect(
-        controller.refresh(request({ cookies: {} }), res as unknown as Response),
+        controller.refresh(
+          request({ cookies: {} }),
+          res as unknown as Response,
+        ),
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(authService.refresh).not.toHaveBeenCalled();
     });
@@ -182,9 +185,7 @@ describe('AuthController', () => {
       email: 'ada@example.com',
     });
 
-    expect(authService.forgotPassword).toHaveBeenCalledWith(
-      'ada@example.com',
-    );
+    expect(authService.forgotPassword).toHaveBeenCalledWith('ada@example.com');
     expect(result.success).toBe(true);
   });
 

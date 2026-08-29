@@ -11,7 +11,7 @@ export interface FormFieldProps extends React.InputHTMLAttributes<HTMLInputEleme
 }
 
 const baseInputStyles =
-  "h-12 w-full rounded-[var(--radius-inner)] border border-[var(--color-border)] bg-[var(--color-input)]/30 px-4 text-[15px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] transition-colors duration-150 outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-ring)]/30 disabled:opacity-50";
+  "h-10 w-full rounded-[var(--radius-inner)] border border-[var(--color-border)] bg-[var(--color-input)]/30 px-4 text-[15px] text-[var(--color-foreground)] placeholder:text-[var(--color-muted-foreground)] transition-colors duration-150 outline-none focus:border-[var(--color-primary)] focus:ring-2 focus:ring-[var(--color-ring)]/30 disabled:opacity-50";
 
 export const FormField = forwardRef<HTMLInputElement, FormFieldProps>(
   (

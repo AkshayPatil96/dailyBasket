@@ -3,6 +3,10 @@ interface AppConfig {
   port: number;
   appUrl: string;
   corsOrigin: string;
+  // Days a non-isSystem (visitor-created) catalog/user record survives before
+  // the nightly cleanup job purges it — keeps the portfolio demo from filling
+  // up with abandoned test data.
+  visitorDataTtlDays: number;
 }
 
 interface DatabaseConfig {
@@ -41,6 +45,7 @@ interface AwsConfig {
   accessKeyId: string | undefined;
   secretAccessKey: string | undefined;
   s3Bucket: string | undefined;
+  cloudfrontUrl: string | undefined;
 }
 
 interface AppConfiguration {
@@ -60,6 +65,7 @@ export default (): AppConfiguration => ({
     port: Number(process.env.PORT ?? 3001),
     appUrl: process.env.APP_URL ?? 'http://localhost:3000',
     corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000',
+    visitorDataTtlDays: Number(process.env.VISITOR_DATA_TTL_DAYS ?? 30),
   },
 
   database: {
@@ -99,5 +105,6 @@ export default (): AppConfiguration => ({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     s3Bucket: process.env.AWS_S3_BUCKET,
+    cloudfrontUrl: process.env.AWS_CLOUDFRONT_URL,
   },
 });

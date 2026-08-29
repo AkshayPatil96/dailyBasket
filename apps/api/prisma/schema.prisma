@@ -10,12 +10,19 @@ enum Role {
   CUSTOMER
   DELIVERY_PARTNER
   ADMIN
+  SUPER_ADMIN
 }
 
 enum UserStatus {
   ACTIVE
   SUSPENDED
   DEACTIVATED
+}
+
+enum AddressLabel {
+  HOME
+  WORK
+  OTHER
 }
 
 enum OrderStatus {
@@ -42,26 +49,64 @@ enum DeliveryStatus {
   FAILED
 }
 
-model User {
-  id               String     @id @default(uuid())
-  firstName        String     @map("first_name")
-  lastName         String     @map("last_name")
-  email            String     @unique
-  emailVerifiedAt  DateTime?  @map("email_verified_at") @db.Timestamptz
-  phone            String?
-  phoneVerifiedAt  DateTime?  @map("phone_verified_at") @db.Timestamptz
-  passwordHash     String     @map("password_hash")
-  profileImageUrl  String?    @map("profile_image_url")
-  role             Role       @default(CUSTOMER)
-  status           UserStatus @default(ACTIVE)
-  createdAt        DateTime   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime?  @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt        DateTime?  @map("deleted_at") @db.Timestamptz
+enum CategoryStatus {
+  ACTIVE
+  INACTIVE
+}
 
-  addresses                Address[]
-  orders                   Order[]
-  emailVerificationTokens  EmailVerificationToken[]
-  passwordResetTokens      PasswordResetToken[]
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum VariantStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum Unit {
+  KG
+  G
+  L
+  ML
+  PIECE
+  PACK
+  DOZEN
+}
+
+enum DietaryTag {
+  VEGETARIAN
+  VEGAN
+  ORGANIC
+  GLUTEN_FREE
+  SUGAR_FREE
+}
+
+model User {
+  id              String     @id @default(uuid())
+  firstName       String     @map("first_name")
+  lastName        String     @map("last_name")
+  email           String     @unique
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz
+  phone           String?
+  phoneVerifiedAt DateTime?  @map("phone_verified_at") @db.Timestamptz
+  passwordHash    String     @map("password_hash")
+  profileImageUrl String?    @map("profile_image_url")
+  role            Role       @default(CUSTOMER)
+  status          UserStatus @default(ACTIVE)
+  // Seeded demo/showcase accounts — never touched by the visitor-data TTL cleanup job.
+  isSystem        Boolean    @default(false) @map("is_system")
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime?  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz
+
+  addresses               Address[]
+  orders                  Order[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
 
   @@map("users")
 }
@@ -95,83 +140,147 @@ model PasswordResetToken {
 }
 
 model Address {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  label     String
-  line1     String
-  line2     String?
-  city      String
-  state     String
-  postalCode String   @map("postal_code")
-  latitude  Float?
-  longitude Float?
-  isDefault Boolean   @default(false) @map("is_default")
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  id               String       @id @default(uuid())
+  userId           String       @map("user_id")
+  label            AddressLabel @default(HOME)
+  recipientName    String       @map("recipient_name")
+  phone            String
+  line1            String
+  line2            String?
+  landmark         String?
+  city             String
+  state            String
+  country          String       @default("India")
+  postalCode       String       @map("postal_code")
+  latitude         Float?
+  longitude        Float?
+  formattedAddress String?      @map("formatted_address")
+  isDefault        Boolean      @default(false) @map("is_default")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime?    @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt        DateTime?    @map("deleted_at") @db.Timestamptz
 
-  user  User    @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
   orders Order[]
 
+  @@index([userId])
   @@map("addresses")
 }
 
 model Category {
-  id        String    @id @default(uuid())
-  name      String
-  slug      String    @unique
-  imageUrl  String?   @map("image_url")
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  id          String         @id @default(uuid())
+  parentId    String?        @map("parent_id")
+  name        String
+  slug        String         @unique
+  description String?
+  imageUrl    String?        @map("image_url")
+  sortOrder   Int            @default(0) @map("sort_order")
+  status      CategoryStatus @default(ACTIVE)
+  // Seed catalog data, protected from edit/delete by anyone below SUPER_ADMIN
+  // and exempt from the visitor-data TTL cleanup job.
+  isSystem    Boolean        @default(false) @map("is_system")
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime?      @updatedAt @map("updated_at") @db.Timestamptz
 
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
   products Product[]
 
+  @@index([parentId])
   @@map("categories")
 }
 
 model Product {
-  id          String    @id @default(uuid())
-  categoryId  String    @map("category_id")
-  name        String
-  slug        String    @unique
-  description String?
-  price       Decimal   @db.Decimal(10, 2)
-  unit        String
-  imageUrl    String?   @map("image_url")
-  isActive    Boolean   @default(true) @map("is_active")
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime? @updatedAt @map("updated_at") @db.Timestamptz
-  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+  id              String        @id @default(uuid())
+  categoryId      String        @map("category_id")
+  // Plain optional label, not a managed entity — Zepto/Blinkit don't model brand
+  // as a first-class schema either; some products carry one, most don't.
+  brand           String?
+  name            String
+  slug            String        @unique
+  description     String?
+  ingredients     String?
+  nutritionalInfo Json?         @map("nutritional_info")
+  dietaryInfo     DietaryTag[]  @map("dietary_info")
+  countryOfOrigin String?       @map("country_of_origin")
+  status          ProductStatus @default(DRAFT)
+  isFeatured      Boolean       @default(false) @map("is_featured")
+  // Seed catalog data — protection/exemption same as Category.isSystem.
+  // Variants and images aren't flagged individually; they inherit protection
+  // from their parent product to avoid a duplicated flag drifting out of sync.
+  isSystem        Boolean       @default(false) @map("is_system")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
 
-  category   Category    @relation(fields: [categoryId], references: [id])
-  inventory  Inventory?
+  category   Category         @relation(fields: [categoryId], references: [id])
+  images     ProductImage[]
+  variants   ProductVariant[]
   orderItems OrderItem[]
 
+  @@index([categoryId])
+  @@index([status, isFeatured])
   @@map("products")
 }
 
-model Inventory {
-  id          String    @id @default(uuid())
-  productId   String    @unique @map("product_id")
-  quantity    Int       @default(0)
-  lowStockAt  Int       @default(10) @map("low_stock_at")
-  updatedAt   DateTime? @updatedAt @map("updated_at") @db.Timestamptz
+model ProductImage {
+  id        String   @id @default(uuid())
+  productId String   @map("product_id")
+  url       String
+  altText   String?  @map("alt_text")
+  sortOrder Int      @default(0) @map("sort_order")
+  isPrimary Boolean  @default(false) @map("is_primary")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   product Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
+  @@map("product_images")
+}
+
+model ProductVariant {
+  id             String        @id @default(uuid())
+  productId      String        @map("product_id")
+  skuCode        String        @unique @map("sku_code")
+  barcode        String?       @unique
+  label          String
+  quantity       Int
+  unit           Unit
+  price          Decimal       @db.Decimal(10, 2)
+  compareAtPrice Decimal?      @map("compare_at_price") @db.Decimal(10, 2)
+  status         VariantStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
+
+  product   Product    @relation(fields: [productId], references: [id])
+  inventory Inventory?
+
+  @@index([productId])
+  @@map("product_variants")
+}
+
+model Inventory {
+  id               String    @id @default(uuid())
+  variantId        String    @unique @map("variant_id")
+  quantity         Int       @default(0)
+  reservedQuantity Int       @default(0) @map("reserved_quantity")
+  reorderLevel     Int       @default(10) @map("reorder_level")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime? @updatedAt @map("updated_at") @db.Timestamptz
+
+  variant ProductVariant @relation(fields: [variantId], references: [id])
 
   @@map("inventory")
 }
 
 model Coupon {
-  id             String    @id @default(uuid())
-  code           String    @unique
-  discountType   String    @map("discount_type")
-  discountValue  Decimal   @map("discount_value") @db.Decimal(10, 2)
-  minOrderValue  Decimal?  @map("min_order_value") @db.Decimal(10, 2)
-  expiresAt      DateTime? @map("expires_at") @db.Timestamptz
-  isActive       Boolean   @default(true) @map("is_active")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id            String    @id @default(uuid())
+  code          String    @unique
+  discountType  String    @map("discount_type")
+  discountValue Decimal   @map("discount_value") @db.Decimal(10, 2)
+  minOrderValue Decimal?  @map("min_order_value") @db.Decimal(10, 2)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   orders Order[]
 
@@ -179,23 +288,23 @@ model Coupon {
 }
 
 model Order {
-  id            String        @id @default(uuid())
-  userId        String        @map("user_id")
-  addressId     String        @map("address_id")
-  couponId      String?       @map("coupon_id")
-  status        OrderStatus   @default(PENDING)
-  subtotal      Decimal       @db.Decimal(10, 2)
-  deliveryFee   Decimal       @default(0) @map("delivery_fee") @db.Decimal(10, 2)
-  discount      Decimal       @default(0) @db.Decimal(10, 2)
-  total         Decimal       @db.Decimal(10, 2)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  addressId   String      @map("address_id")
+  couponId    String?     @map("coupon_id")
+  status      OrderStatus @default(PENDING)
+  subtotal    Decimal     @db.Decimal(10, 2)
+  deliveryFee Decimal     @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  discount    Decimal     @default(0) @db.Decimal(10, 2)
+  total       Decimal     @db.Decimal(10, 2)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime?   @updatedAt @map("updated_at") @db.Timestamptz
 
-  user    User        @relation(fields: [userId], references: [id])
-  address Address     @relation(fields: [addressId], references: [id])
-  coupon  Coupon?     @relation(fields: [couponId], references: [id])
-  items   OrderItem[]
-  payment Payment?
+  user     User        @relation(fields: [userId], references: [id])
+  address  Address     @relation(fields: [addressId], references: [id])
+  coupon   Coupon?     @relation(fields: [couponId], references: [id])
+  items    OrderItem[]
+  payment  Payment?
   delivery Delivery?
 
   @@map("orders")
@@ -230,14 +339,14 @@ model Payment {
 }
 
 model Delivery {
-  id               String         @id @default(uuid())
-  orderId          String         @unique @map("order_id")
-  deliveryPartnerId String?       @map("delivery_partner_id")
-  status           DeliveryStatus @default(ASSIGNED)
-  currentLatitude  Float?         @map("current_latitude")
-  currentLongitude Float?         @map("current_longitude")
-  assignedAt       DateTime       @default(now()) @map("assigned_at") @db.Timestamptz
-  deliveredAt      DateTime?      @map("delivered_at") @db.Timestamptz
+  id                String         @id @default(uuid())
+  orderId           String         @unique @map("order_id")
+  deliveryPartnerId String?        @map("delivery_partner_id")
+  status            DeliveryStatus @default(ASSIGNED)
+  currentLatitude   Float?         @map("current_latitude")
+  currentLongitude  Float?         @map("current_longitude")
+  assignedAt        DateTime       @default(now()) @map("assigned_at") @db.Timestamptz
+  deliveredAt       DateTime?      @map("delivered_at") @db.Timestamptz
 
   order Order @relation(fields: [orderId], references: [id])
 

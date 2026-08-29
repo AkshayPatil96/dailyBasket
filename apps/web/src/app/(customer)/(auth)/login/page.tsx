@@ -20,6 +20,15 @@ import { toast } from "sonner";
 const isSafeNext = (value: string | null): value is string =>
   value !== null && /^\/(?!\/|\\)/.test(value);
 
+// Every seeded demo account shares this password — see
+// apps/api/prisma/seeds/seed-demo-accounts.js.
+const DEMO_PASSWORD = "Demo@1234";
+const DEMO_ACCOUNTS = [
+  { label: "Customer", email: "demo.customer@dailybasket.app" },
+  { label: "Delivery", email: "demo.delivery@dailybasket.app" },
+  { label: "Admin", email: "demo.admin@dailybasket.app" },
+];
+
 export default function LoginPage() {
   return (
     <Suspense>
@@ -35,6 +44,7 @@ function LoginForm() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<LoginInput>({ resolver: zodResolver(loginSchema) });
 
@@ -124,6 +134,30 @@ function LoginForm() {
             Sign in
           </Button>
         </form>
+
+        <div className="flex flex-col gap-3 rounded-(--radius-inner) border border-(--color-border) bg-(--color-muted)/40 p-4">
+          <p className="text-sm font-semibold text-(--color-foreground)">Demo logins</p>
+          <div className="flex flex-col">
+            {DEMO_ACCOUNTS.map((account) => (
+              <button
+                key={account.email}
+                type="button"
+                onClick={() => {
+                  setValue("email", account.email);
+                  setValue("password", DEMO_PASSWORD);
+                }}
+                className="flex cursor-pointer items-center justify-between gap-3 rounded-(--radius-inner) px-2 py-1.5 text-left text-sm transition-colors hover:bg-(--color-background)"
+              >
+                <span className="font-medium text-(--color-foreground)">{account.label}</span>
+                <span className="text-(--color-muted-foreground)">{account.email}</span>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-(--color-muted-foreground)">
+            Password for all:{" "}
+            <span className="font-medium text-(--color-primary)">{DEMO_PASSWORD}</span>
+          </p>
+        </div>
 
         <p className="text-center text-sm text-(--color-muted-foreground)">
           New to DailyBasket?{" "}

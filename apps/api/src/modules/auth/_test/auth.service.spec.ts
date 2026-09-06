@@ -25,6 +25,7 @@ describe('AuthService', () => {
     user: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock };
     emailVerificationToken: {
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
     };
@@ -71,6 +72,7 @@ describe('AuthService', () => {
       user: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
       emailVerificationToken: {
         findUnique: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn(),
         update: jest.fn(),
       },
@@ -391,11 +393,24 @@ describe('AuthService', () => {
 
     it('issues a new verification token for an unverified account', async () => {
       prisma.user.findUnique.mockResolvedValue(baseUser);
+      prisma.emailVerificationToken.findFirst.mockResolvedValue(null);
       prisma.emailVerificationToken.create.mockResolvedValue({});
 
       await service.resendVerification(baseUser.email);
 
       expect(emailService.sendVerificationEmail).toHaveBeenCalled();
+    });
+
+    it('silently skips within the cooldown of the last sent token', async () => {
+      prisma.user.findUnique.mockResolvedValue(baseUser);
+      prisma.emailVerificationToken.findFirst.mockResolvedValue({
+        createdAt: new Date(),
+      });
+
+      await service.resendVerification(baseUser.email);
+
+      expect(emailService.sendVerificationEmail).not.toHaveBeenCalled();
+      expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
     });
   });
 

@@ -152,6 +152,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
   notifications           Notification[]
+  couponRedemptions       CouponRedemption[]
 
   @@map("users")
 }
@@ -354,10 +355,14 @@ model Cart {
   // as an opaque value in an HTTP-only cookie — see AGENTS.md cart doc.
   userId    String?    @map("user_id")
   status    CartStatus @default(ACTIVE)
+  // UX-only, like the rest of CartSummary's totals — checkout revalidates
+  // this coupon against live rules, never trusts what the cart shows.
+  couponId  String?    @map("coupon_id")
   createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime?  @updatedAt @map("updated_at") @db.Timestamptz
 
   user             User?             @relation(fields: [userId], references: [id])
+  coupon           Coupon?           @relation(fields: [couponId], references: [id])
   items            CartItem[]
   checkoutSessions CheckoutSession[]
 
@@ -381,33 +386,128 @@ model CartItem {
   @@map("cart_items")
 }
 
-model Coupon {
-  id            String    @id @default(uuid())
-  code          String    @unique
-  discountType  String    @map("discount_type")
-  discountValue Decimal   @map("discount_value") @db.Decimal(10, 2)
-  minOrderValue Decimal?  @map("min_order_value") @db.Decimal(10, 2)
-  expiresAt     DateTime? @map("expires_at") @db.Timestamptz
-  isActive      Boolean   @default(true) @map("is_active")
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+enum CouponDiscountType {
+  FLAT
+  PERCENTAGE
+}
 
-  orders Order[]
+// Product/category-scoped eligibility is intentionally not modeled — every
+// coupon here is store-wide, matching the doc's own SAVE100 example. Adding
+// scoped eligibility is a real feature (a join table + matching logic), not
+// a field, and nothing has asked for it yet.
+model Coupon {
+  id                String             @id @default(uuid())
+  code              String             @unique
+  description       String?
+  discountType      CouponDiscountType @map("discount_type")
+  discountValue     Decimal            @map("discount_value") @db.Decimal(10, 2)
+  // Only meaningful for PERCENTAGE — caps the discount in rupees so "20% off"
+  // can't blow past a sane ceiling. Ignored for FLAT (the flat value already
+  // is the cap).
+  maxDiscountAmount Decimal?           @map("max_discount_amount") @db.Decimal(10, 2)
+  minOrderValue     Decimal?           @map("min_order_value") @db.Decimal(10, 2)
+  // Null on either = unlimited. usedCount is the atomic counter incremented
+  // on redemption (checked with a WHERE guard, same affected-row-count
+  // pattern as inventory reservation) — usageLimitPerUser is enforced
+  // separately via CouponRedemption, since a global counter can't answer
+  // "has this specific customer already used it."
+  usageLimit        Int?               @map("usage_limit")
+  usageLimitPerUser Int?               @map("usage_limit_per_user")
+  usedCount         Int                @default(0) @map("used_count")
+  expiresAt         DateTime?          @map("expires_at") @db.Timestamptz
+  isActive          Boolean            @default(true) @map("is_active")
+  // Admin-curated — shown inline on the cart page without opening the full
+  // "available offers" list. Purely a display flag, no effect on eligibility.
+  isFeatured        Boolean            @default(false) @map("is_featured")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime?          @updatedAt @map("updated_at") @db.Timestamptz
+
+  orders           Order[]
+  carts            Cart[]
+  checkoutSessions CheckoutSession[]
+  redemptions      CouponRedemption[]
 
   @@map("coupons")
 }
 
+// One row per successful redemption — the only reliable way to answer
+// "has this customer already used this coupon" (a global usedCount counter
+// can't answer a per-customer question). Guests are tracked by email, same
+// guest/account split used everywhere else in this schema.
+model CouponRedemption {
+  id         String   @id @default(uuid())
+  couponId   String   @map("coupon_id")
+  userId     String?  @map("user_id")
+  guestEmail String?  @map("guest_email")
+  orderId    String   @unique @map("order_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
+  order  Order  @relation(fields: [orderId], references: [id])
+
+  @@index([couponId, userId])
+  @@index([couponId, guestEmail])
+  @@map("coupon_redemptions")
+}
+
+// Singleton — always exactly one row, addressed by the fixed id below
+// (SettingsService.SINGLETON_ID), never queried by any other key. A single
+// typed row rather than a generic key-value table: this is an admin CRUD
+// app, not a plugin platform, so a fixed schema is more type-safe and no
+// less flexible for the settings that actually exist.
+enum HandlingChargeType {
+  FIXED
+  PERCENTAGE
+}
+
+// No GST/tax modeling — product prices are tax-inclusive (the MRP
+// convention every quick-commerce app already uses), and a per-category
+// rate would need per-line tax breakdown the moment a cart mixes categories
+// at different rates. Not worth the complexity for a price that's already
+// final.
+model SystemSettings {
+  id                    String   @id @default("default")
+  deliveryFee           Decimal  @default(40) @map("delivery_fee") @db.Decimal(10, 2)
+  // Null = disabled — delivery is never free regardless of order size.
+  freeDeliveryThreshold Decimal? @map("free_delivery_threshold") @db.Decimal(10, 2)
+
+  // FIXED: handlingChargeValue is a flat ₹ amount, handlingChargeMaxAmount
+  // unused. PERCENTAGE: handlingChargeValue is a % of subtotal, charged
+  // amount is capped at handlingChargeMaxAmount (same min(percent, cap)
+  // pattern as a PERCENTAGE coupon's maxDiscountAmount).
+  handlingChargeType         HandlingChargeType @default(FIXED) @map("handling_charge_type")
+  handlingChargeValue        Decimal            @default(0) @map("handling_charge_value") @db.Decimal(10, 2)
+  handlingChargeMaxAmount    Decimal?           @map("handling_charge_max_amount") @db.Decimal(10, 2)
+  // Promotional waiver — e.g. "free during launch week". Not the same as
+  // charging ₹0: the customer still sees the original amount struck through
+  // plus the reason, rather than the fee just silently not existing.
+  handlingChargeWaivedUntil  DateTime?          @map("handling_charge_waived_until") @db.Timestamptz
+  handlingChargeWaiverReason String?            @map("handling_charge_waiver_reason")
+
+  // Hard checkout kill-switch — CheckoutService.start() refuses new sessions
+  // while true. Does not affect already-placed orders or admin access.
+  maintenanceMode Boolean   @default(false) @map("maintenance_mode")
+  bannerText      String?   @map("banner_text")
+  supportEmail    String?   @map("support_email")
+  supportPhone    String?   @map("support_phone")
+  updatedAt       DateTime? @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("system_settings")
+}
+
 model Order {
-  id String @id @default(uuid())
+  id          String  @id @default(uuid())
   // Human-facing identifier (DB-YYYYMMDD-NNNNNN), generated from the
   // order_number_seq Postgres sequence at creation — the UUID id is never
   // shown to customers (dailybasket-orders-order-tracking.md §3).
-  orderNumber String @unique @map("order_number")
+  orderNumber String  @unique @map("order_number")
   // Null for a guest order — see CheckoutSession for the same guest/user split as Cart.
-  userId    String? @map("user_id")
+  userId      String? @map("user_id")
   // Traceability only — the fields below are the authoritative snapshot per
   // AGENTS.md/checkout doc, since a saved address can change or be deleted later.
-  addressId String? @map("address_id")
-  couponId  String? @map("coupon_id")
+  addressId   String? @map("address_id")
+  couponId    String? @map("coupon_id")
 
   recipientName    String  @map("recipient_name")
   phone            String
@@ -425,24 +525,26 @@ model Order {
   // Contact for a guest order — authenticated orders use user.email instead.
   guestEmail String? @map("guest_email")
 
-  status      OrderStatus @default(CONFIRMED)
-  subtotal    Decimal     @db.Decimal(10, 2)
-  discount    Decimal     @default(0) @db.Decimal(10, 2)
-  deliveryFee Decimal     @default(0) @map("delivery_fee") @db.Decimal(10, 2)
-  tax         Decimal     @default(0) @db.Decimal(10, 2)
-  total       Decimal     @db.Decimal(10, 2)
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime?   @updatedAt @map("updated_at") @db.Timestamptz
+  status         OrderStatus @default(CONFIRMED)
+  subtotal       Decimal     @db.Decimal(10, 2)
+  discount       Decimal     @default(0) @db.Decimal(10, 2)
+  deliveryFee    Decimal     @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  handlingCharge Decimal     @default(0) @map("handling_charge") @db.Decimal(10, 2)
+  tax            Decimal     @default(0) @db.Decimal(10, 2)
+  total          Decimal     @db.Decimal(10, 2)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime?   @updatedAt @map("updated_at") @db.Timestamptz
 
-  user            User?            @relation(fields: [userId], references: [id])
-  address         Address?         @relation(fields: [addressId], references: [id])
-  coupon          Coupon?          @relation(fields: [couponId], references: [id])
-  items           OrderItem[]
-  payment         Payment?
-  delivery        Delivery?
-  events          OrderEvent[]
-  notifications   Notification[]
-  checkoutSession CheckoutSession?
+  user             User?             @relation(fields: [userId], references: [id])
+  address          Address?          @relation(fields: [addressId], references: [id])
+  coupon           Coupon?           @relation(fields: [couponId], references: [id])
+  items            OrderItem[]
+  payment          Payment?
+  delivery         Delivery?
+  events           OrderEvent[]
+  notifications    Notification[]
+  couponRedemption CouponRedemption?
+  checkoutSession  CheckoutSession?
 
   @@map("orders")
 }
@@ -531,11 +633,17 @@ model CheckoutSession {
   longitude        Float?
   formattedAddress String? @map("formatted_address")
 
-  subtotal    Decimal @default(0) @db.Decimal(10, 2)
-  discount    Decimal @default(0) @db.Decimal(10, 2)
-  deliveryFee Decimal @default(0) @map("delivery_fee") @db.Decimal(10, 2)
-  tax         Decimal @default(0) @db.Decimal(10, 2)
-  total       Decimal @default(0) @db.Decimal(10, 2)
+  // Inherited from the cart at start() as the customer's stated intent, then
+  // independently revalidated (min order, expiry, usage limits...) each time
+  // createPayment() recomputes pricing — never trusted as-is.
+  couponId String? @map("coupon_id")
+
+  subtotal       Decimal @default(0) @db.Decimal(10, 2)
+  discount       Decimal @default(0) @db.Decimal(10, 2)
+  deliveryFee    Decimal @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  handlingCharge Decimal @default(0) @map("handling_charge") @db.Decimal(10, 2)
+  tax            Decimal @default(0) @db.Decimal(10, 2)
+  total          Decimal @default(0) @db.Decimal(10, 2)
 
   orderId String? @unique @map("order_id")
 
@@ -549,6 +657,7 @@ model CheckoutSession {
 
   cart         Cart                  @relation(fields: [cartId], references: [id])
   user         User?                 @relation(fields: [userId], references: [id])
+  coupon       Coupon?               @relation(fields: [couponId], references: [id])
   order        Order?                @relation(fields: [orderId], references: [id])
   payment      Payment?
   reservations CheckoutReservation[]

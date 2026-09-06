@@ -9,9 +9,10 @@ import {
 } from '@nestjs/common';
 import { CheckoutSession, Order, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DELIVERY_FEE } from '../../config/pricing.constants';
 import { PaymentsService } from '../payments/payments.service';
 import { OrdersService } from '../orders/orders.service';
+import { CouponsService } from '../coupons/coupons.service';
+import { SettingsService } from '../settings/settings.service';
 import type { StartCheckoutDto } from './dto/start-checkout.dto';
 import type { SetCheckoutAddressDto } from './dto/set-checkout-address.dto';
 import type { VerifyPaymentDto } from './dto/verify-payment.dto';
@@ -38,6 +39,8 @@ export class CheckoutService {
     private readonly prisma: PrismaService,
     private readonly paymentsService: PaymentsService,
     private readonly ordersService: OrdersService,
+    private readonly couponsService: CouponsService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   async start(
@@ -45,6 +48,11 @@ export class CheckoutService {
     guestCartId: string | undefined,
     dto: StartCheckoutDto,
   ): Promise<CheckoutSession> {
+    const settings = await this.settingsService.get();
+    if (settings.maintenanceMode) {
+      throw new ConflictException('Checkout is temporarily unavailable. Please try again shortly.');
+    }
+
     const cart = await this.findCart(userId, guestCartId);
     if (!cart) {
       throw new BadRequestException('Your cart is empty');
@@ -58,6 +66,10 @@ export class CheckoutService {
       data: {
         cartId: cart.id,
         userId,
+        // Inherited as the customer's stated intent, then independently
+        // revalidated against live rules in createPayment() — never trusted
+        // as-is (same reasoning as the address/pricing snapshot below).
+        couponId: cart.couponId,
         guestEmail: userId ? undefined : dto.guestEmail,
         status: 'PENDING',
         expiresAt: new Date(Date.now() + SESSION_TTL_MS),
@@ -172,7 +184,10 @@ export class CheckoutService {
       throw new BadRequestException('Your cart is empty');
     }
 
+    const settings = await this.settingsService.get();
+
     let subtotal = 0;
+    let discount = 0;
     await this.prisma.$transaction(async (tx) => {
       await this.releaseReservationsInTx(tx, session.id);
 
@@ -211,23 +226,54 @@ export class CheckoutService {
         });
       }
 
-      const deliveryFee = DELIVERY_FEE;
-      const total = subtotal + deliveryFee;
+      // Revalidated against live rules right here, using the just-computed
+      // subtotal — not trusted from whatever was true when it was applied in
+      // the cart or inherited into the session at start(). Any failure
+      // (expired, min order no longer met, usage limit hit meanwhile) throws
+      // straight through with its specific reason.
+      if (session.couponId) {
+        const coupon = await this.couponsService.revalidateById(
+          session.couponId,
+          subtotal,
+          userId,
+          session.guestEmail ?? undefined,
+        );
+        discount = this.couponsService.calculateDiscount(coupon, subtotal);
+      }
+
+      const freeDeliveryThreshold = settings.freeDeliveryThreshold
+        ? Number(settings.freeDeliveryThreshold)
+        : null;
+      const deliveryFee =
+        freeDeliveryThreshold !== null && subtotal >= freeDeliveryThreshold
+          ? 0
+          : Number(settings.deliveryFee);
+      const handlingCharge = this.settingsService.computeHandlingCharge(settings, subtotal).amount;
+      const total = subtotal - discount + handlingCharge + deliveryFee;
       await tx.checkoutSession.update({
         where: { id: session.id },
         data: {
           status: 'AWAITING_PAYMENT',
           subtotal,
           deliveryFee,
-          tax: 0,
-          discount: 0,
+          handlingCharge,
+          discount,
           total,
           reservationExpiresAt: new Date(Date.now() + RESERVATION_TTL_MS),
         },
       });
     });
 
-    const total = subtotal + DELIVERY_FEE;
+    // Recomputed identically outside the transaction (fee/threshold don't
+    // change mid-transaction) — needed here to build the Razorpay order
+    // after the transaction has committed the session's own copy.
+    const freeDeliveryThreshold = settings.freeDeliveryThreshold
+      ? Number(settings.freeDeliveryThreshold)
+      : null;
+    const deliveryFee =
+      freeDeliveryThreshold !== null && subtotal >= freeDeliveryThreshold ? 0 : Number(settings.deliveryFee);
+    const handlingCharge = this.settingsService.computeHandlingCharge(settings, subtotal).amount;
+    const total = subtotal - discount + handlingCharge + deliveryFee;
     const razorpayOrder = await this.paymentsService.createOrder(total, session.id);
 
     const payment = await this.prisma.payment.upsert({

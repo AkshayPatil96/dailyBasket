@@ -181,8 +181,62 @@ export interface CartSummary {
   items: CartItemSummary[];
   itemCount: number;
   subtotal: number;
+  discount: number;
+  couponCode: string | null;
+  handlingCharge: number;
+  handlingChargeOriginalAmount: number;
+  handlingChargeWaived: boolean;
+  handlingChargeWaiverReason: string | null;
   deliveryFee: number;
+  deliveryFeeOriginalAmount: number;
   total: number;
+}
+
+export type CouponDiscountType = 'FLAT' | 'PERCENTAGE';
+
+export interface Coupon {
+  id: string;
+  code: string;
+  description?: string | null;
+  discountType: CouponDiscountType;
+  /** Prisma Decimal — serialized as a string over JSON, not a number. */
+  discountValue: string;
+  maxDiscountAmount?: string | null;
+  minOrderValue?: string | null;
+  usageLimit?: number | null;
+  usageLimitPerUser?: number | null;
+  usedCount: number;
+  expiresAt?: string | null;
+  isActive: boolean;
+  isFeatured: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface AvailableCoupon {
+  coupon: Coupon;
+  eligible: boolean;
+  reason?: string;
+}
+
+export type HandlingChargeType = 'FIXED' | 'PERCENTAGE';
+
+/** Singleton admin-config row — see dailybasket-cart-architecture.md for the pricing model. */
+export interface SystemSettings {
+  id: string;
+  /** Prisma Decimal — serialized as a string over JSON, not a number. */
+  deliveryFee: string;
+  freeDeliveryThreshold?: string | null;
+  handlingChargeType: HandlingChargeType;
+  handlingChargeValue: string;
+  handlingChargeMaxAmount?: string | null;
+  handlingChargeWaivedUntil?: string | null;
+  handlingChargeWaiverReason?: string | null;
+  maintenanceMode: boolean;
+  bannerText?: string | null;
+  supportEmail?: string | null;
+  supportPhone?: string | null;
+  updatedAt?: string | null;
 }
 
 export interface OrderItem {

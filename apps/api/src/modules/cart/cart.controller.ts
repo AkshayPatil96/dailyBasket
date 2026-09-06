@@ -15,6 +15,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-request
 import { CartService, type CartSummary } from './cart.service';
 import { AddCartItemDto } from './dto/add-cart-item.dto';
 import { UpdateCartItemDto } from './dto/update-cart-item.dto';
+import { ApplyCouponDto } from './dto/apply-coupon.dto';
 
 const GUEST_CART_COOKIE = 'cart_id';
 // Matches the cart architecture doc's abandoned-cart cleanup window — the
@@ -79,6 +80,26 @@ export class CartController {
   @HttpCode(200)
   async clearCart(@Req() req: AuthenticatedRequest): Promise<CartSummary> {
     return this.cartService.clearCart(req.user?.id, this.guestCartId(req));
+  }
+
+  @Get('coupons/available')
+  async listAvailableCoupons(@Req() req: AuthenticatedRequest) {
+    return this.cartService.listAvailableCoupons(req.user?.id, this.guestCartId(req));
+  }
+
+  @Post('coupon')
+  @HttpCode(200)
+  async applyCoupon(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: ApplyCouponDto,
+  ): Promise<CartSummary> {
+    return this.cartService.applyCoupon(req.user?.id, this.guestCartId(req), dto.code);
+  }
+
+  @Post('coupon/remove')
+  @HttpCode(200)
+  async removeCoupon(@Req() req: AuthenticatedRequest): Promise<CartSummary> {
+    return this.cartService.removeCoupon(req.user?.id, this.guestCartId(req));
   }
 
   private guestCartId(req: AuthenticatedRequest): string | undefined {

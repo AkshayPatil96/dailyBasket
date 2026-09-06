@@ -4,6 +4,7 @@ import { cartApi } from '@/lib/cart-api';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 export const cartQueryKey = ['cart'] as const;
+const availableCouponsQueryKey = ['cart', 'coupons', 'available'] as const;
 
 export function useCart() {
   const { isLoading: isLoadingUser } = useCurrentUser();
@@ -24,36 +25,56 @@ export function useCart() {
   };
 }
 
-export function useAddToCart() {
+// Subtotal-changing mutations invalidate the available-coupons list too —
+// eligibility (min order value, "already used") depends on subtotal, and
+// that query has its own 30s staleTime so it won't just pick up the change
+// on its own the way the cart query does via setQueryData.
+function useCartMutation<TVariables>(
+  mutationFn: (variables: TVariables) => Promise<CartSummary>,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ variantId, quantity = 1 }: { variantId: string; quantity?: number }) =>
-      cartApi.addItem(variantId, quantity),
-    onSuccess: (summary: CartSummary) => queryClient.setQueryData(cartQueryKey, summary),
+    mutationFn,
+    onSuccess: (summary: CartSummary) => {
+      queryClient.setQueryData(cartQueryKey, summary);
+      queryClient.invalidateQueries({ queryKey: availableCouponsQueryKey });
+    },
   });
+}
+
+export function useAddToCart() {
+  return useCartMutation(({ variantId, quantity = 1 }: { variantId: string; quantity?: number }) =>
+    cartApi.addItem(variantId, quantity),
+  );
 }
 
 export function useUpdateCartItem() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ itemId, quantity }: { itemId: string; quantity: number }) =>
-      cartApi.updateItem(itemId, quantity),
-    onSuccess: (summary: CartSummary) => queryClient.setQueryData(cartQueryKey, summary),
-  });
+  return useCartMutation(({ itemId, quantity }: { itemId: string; quantity: number }) =>
+    cartApi.updateItem(itemId, quantity),
+  );
 }
 
 export function useRemoveCartItem() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (itemId: string) => cartApi.removeItem(itemId),
-    onSuccess: (summary: CartSummary) => queryClient.setQueryData(cartQueryKey, summary),
-  });
+  return useCartMutation((itemId: string) => cartApi.removeItem(itemId));
 }
 
 export function useClearCart() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => cartApi.clear(),
-    onSuccess: (summary: CartSummary) => queryClient.setQueryData(cartQueryKey, summary),
+  return useCartMutation<void>(() => cartApi.clear());
+}
+
+export function useApplyCoupon() {
+  return useCartMutation((code: string) => cartApi.applyCoupon(code));
+}
+
+export function useRemoveCoupon() {
+  return useCartMutation<void>(() => cartApi.removeCoupon());
+}
+
+export function useAvailableCoupons(enabled: boolean) {
+  return useQuery({
+    queryKey: availableCouponsQueryKey,
+    queryFn: cartApi.listAvailableCoupons,
+    enabled,
+    staleTime: 30_000,
   });
 }

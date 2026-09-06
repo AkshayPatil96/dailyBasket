@@ -1,7 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { DELIVERY_FEE } from '../../config/pricing.constants';
+import { CouponsService } from '../coupons/coupons.service';
+import { SettingsService } from '../settings/settings.service';
 import type { AddCartItemDto } from './dto/add-cart-item.dto';
 import type { UpdateCartItemDto } from './dto/update-cart-item.dto';
 
@@ -17,6 +18,8 @@ const CART_ITEM_INCLUDE = {
     },
   },
 } satisfies Prisma.CartItemInclude;
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 type CartItemWithRelations = Prisma.CartItemGetPayload<{
   include: typeof CART_ITEM_INCLUDE;
@@ -45,7 +48,19 @@ export interface CartSummary {
   items: CartItemSummary[];
   itemCount: number;
   subtotal: number;
+  discount: number;
+  couponCode: string | null;
+  handlingCharge: number;
+  // Only meaningful when handlingChargeWaived is true — the amount it would
+  // have been, so the UI can show it struck through next to "FREE".
+  handlingChargeOriginalAmount: number;
+  handlingChargeWaived: boolean;
+  handlingChargeWaiverReason: string | null;
   deliveryFee: number;
+  // Only meaningful when deliveryFee is 0 due to the free-delivery
+  // threshold — the flat fee it would have been, so the UI can show it
+  // struck through next to "FREE" (same pattern as handlingChargeOriginalAmount).
+  deliveryFeeOriginalAmount: number;
   total: number;
 }
 
@@ -54,13 +69,24 @@ const EMPTY_CART: CartSummary = {
   items: [],
   itemCount: 0,
   subtotal: 0,
+  discount: 0,
+  couponCode: null,
+  handlingCharge: 0,
+  handlingChargeOriginalAmount: 0,
+  handlingChargeWaived: false,
+  handlingChargeWaiverReason: null,
   deliveryFee: 0,
+  deliveryFeeOriginalAmount: 0,
   total: 0,
 };
 
 @Injectable()
 export class CartService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly couponsService: CouponsService,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   async getCart(
     userId: string | undefined,
@@ -70,7 +96,57 @@ export class CartService {
     if (!cart) {
       return EMPTY_CART;
     }
-    return this.buildSummary(cart.id);
+    return this.buildSummary(cart.id, userId);
+  }
+
+  // Cart-time apply only checks what's knowable without a checkout session —
+  // a guest has no email yet, so their per-user usage limit is enforced
+  // authoritatively at checkout instead (see CouponsService).
+  async applyCoupon(
+    userId: string | undefined,
+    guestCartId: string | undefined,
+    code: string,
+  ): Promise<CartSummary> {
+    const cart = await this.findActiveCart(userId, guestCartId);
+    if (!cart) {
+      throw new NotFoundException('Your cart is empty');
+    }
+    const items = await this.prisma.cartItem.findMany({
+      where: { cartId: cart.id },
+      include: { variant: true },
+    });
+    if (items.length === 0) {
+      throw new BadRequestException('Your cart is empty');
+    }
+    const subtotal = items.reduce((sum, item) => sum + Number(item.variant.price) * item.quantity, 0);
+    const coupon = await this.couponsService.validateByCode(code, subtotal, userId);
+    await this.prisma.cart.update({ where: { id: cart.id }, data: { couponId: coupon.id } });
+    return this.buildSummary(cart.id, userId);
+  }
+
+  async listAvailableCoupons(userId: string | undefined, guestCartId: string | undefined) {
+    const cart = await this.findActiveCart(userId, guestCartId);
+    if (!cart) {
+      return [];
+    }
+    const items = await this.prisma.cartItem.findMany({
+      where: { cartId: cart.id },
+      include: { variant: true },
+    });
+    const subtotal = items.reduce((sum, item) => sum + Number(item.variant.price) * item.quantity, 0);
+    return this.couponsService.listAvailableForCart(subtotal, userId);
+  }
+
+  async removeCoupon(
+    userId: string | undefined,
+    guestCartId: string | undefined,
+  ): Promise<CartSummary> {
+    const cart = await this.findActiveCart(userId, guestCartId);
+    if (!cart) {
+      throw new NotFoundException('Your cart is empty');
+    }
+    await this.prisma.cart.update({ where: { id: cart.id }, data: { couponId: null } });
+    return this.buildSummary(cart.id, userId);
   }
 
   // Returns the cart id so the controller can (re)set the guest cookie —
@@ -125,7 +201,7 @@ export class CartService {
       });
     }
 
-    return { cartId: cart.id, summary: await this.buildSummary(cart.id) };
+    return { cartId: cart.id, summary: await this.buildSummary(cart.id, userId) };
   }
 
   async updateItemQuantity(
@@ -164,7 +240,7 @@ export class CartService {
       where: { id: itemId },
       data: { quantity: dto.quantity },
     });
-    return this.buildSummary(cart.id);
+    return this.buildSummary(cart.id, userId);
   }
 
   async removeItem(
@@ -179,7 +255,7 @@ export class CartService {
     await this.prisma.cartItem.deleteMany({
       where: { id: itemId, cartId: cart.id },
     });
-    return this.buildSummary(cart.id);
+    return this.buildSummary(cart.id, userId);
   }
 
   async clearCart(
@@ -297,7 +373,8 @@ export class CartService {
     return this.prisma.cart.create({ data: { userId } });
   }
 
-  private async buildSummary(cartId: string): Promise<CartSummary> {
+  private async buildSummary(cartId: string, userId?: string): Promise<CartSummary> {
+    const cart = await this.prisma.cart.findUniqueOrThrow({ where: { id: cartId } });
     const items = await this.prisma.cartItem.findMany({
       where: { cartId },
       include: CART_ITEM_INCLUDE,
@@ -309,15 +386,52 @@ export class CartService {
       (sum, item) => sum + item.lineTotal,
       0,
     );
-    const deliveryFee = itemSummaries.length > 0 ? DELIVERY_FEE : 0;
+    const hasItems = itemSummaries.length > 0;
+
+    const settings = await this.settingsService.get();
+
+    const freeDeliveryThreshold = settings.freeDeliveryThreshold
+      ? Number(settings.freeDeliveryThreshold)
+      : null;
+    const deliveryFee = hasItems
+      ? freeDeliveryThreshold !== null && subtotal >= freeDeliveryThreshold
+        ? 0
+        : Number(settings.deliveryFee)
+      : 0;
+
+    const handling = this.settingsService.computeHandlingCharge(settings, subtotal);
+    const handlingCharge = hasItems ? handling.amount : 0;
+
+    let discount = 0;
+    let couponCode: string | null = null;
+    if (cart.couponId) {
+      try {
+        const coupon = await this.couponsService.revalidateById(cart.couponId, subtotal, userId);
+        discount = this.couponsService.calculateDiscount(coupon, subtotal);
+        couponCode = coupon.code;
+      } catch {
+        // No longer valid (expired, min order no longer met, usage limit hit
+        // since it was applied...) — drop it silently rather than surfacing
+        // an error on every cart GET. The customer can re-apply if they
+        // still want to try, which will give them the real reason.
+        await this.prisma.cart.update({ where: { id: cartId }, data: { couponId: null } });
+      }
+    }
 
     return {
       cartId,
       items: itemSummaries,
       itemCount: itemSummaries.reduce((sum, item) => sum + item.quantity, 0),
       subtotal,
+      discount,
+      couponCode,
+      handlingCharge,
+      handlingChargeOriginalAmount: hasItems ? round2(handling.originalAmount) : 0,
+      handlingChargeWaived: hasItems && handling.waived,
+      handlingChargeWaiverReason: hasItems ? handling.waiverReason : null,
       deliveryFee,
-      total: subtotal + deliveryFee,
+      deliveryFeeOriginalAmount: hasItems ? Number(settings.deliveryFee) : 0,
+      total: round2(subtotal - discount + handlingCharge + deliveryFee),
     };
   }
 

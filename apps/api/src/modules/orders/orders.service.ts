@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { CouponsService } from '../coupons/coupons.service';
 import { AdminListOrdersDto } from './dto/admin-list-orders.dto';
 
 const ORDER_DETAIL_INCLUDE = {
@@ -99,6 +100,7 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
     private readonly notificationsService: NotificationsService,
+    private readonly couponsService: CouponsService,
   ) {}
 
   // Best-effort — a failed email/notification must never break order
@@ -196,14 +198,28 @@ export class OrdersService {
           longitude: session.longitude,
           formattedAddress: session.formattedAddress,
           guestEmail: session.guestEmail,
+          couponId: session.couponId,
           status: 'CONFIRMED',
           subtotal: session.subtotal,
           discount: session.discount,
           deliveryFee: session.deliveryFee,
+          handlingCharge: session.handlingCharge,
           tax: session.tax,
           total: session.total,
         },
       });
+
+      if (session.couponId) {
+        // Atomic usage-limit guard + redemption record, same transaction as
+        // order creation — either both commit or neither does. In the rare
+        // case a concurrent order exhausts the global usage limit in the gap
+        // between createPayment's revalidation and this moment, this throws
+        // and the whole order rolls back; the customer's Razorpay payment is
+        // already captured by then, so this is the same known "payment
+        // succeeded but order creation failed" edge case the checkout doc
+        // already calls out — not something this feature needs to solve.
+        await this.couponsService.redeem(tx, session.couponId, order.id, session.userId, session.guestEmail);
+      }
 
       for (const reservation of session.reservations) {
         const unitPrice = Number(reservation.unitPrice);

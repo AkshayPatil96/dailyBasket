@@ -293,9 +293,52 @@ export default function CheckoutPage() {
                     </span>
                     <span className="text-(--color-foreground)">{formatCurrency(cart.subtotal)}</span>
                   </div>
+                  {cart.discount > 0 ? (
+                    <div className="flex justify-between">
+                      <span className="text-(--color-muted-foreground)">
+                        Discount {cart.couponCode ? `(${cart.couponCode})` : ''}
+                      </span>
+                      <span className="text-(--color-primary)">-{formatCurrency(cart.discount)}</span>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between">
+                    <span className="text-(--color-muted-foreground)">
+                      Handling charge
+                      {cart.handlingChargeWaived && cart.handlingChargeWaiverReason ? (
+                        <span className="ml-1 text-xs text-(--color-primary)">
+                          ({cart.handlingChargeWaiverReason})
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-(--color-foreground)">
+                      {cart.handlingChargeWaived ? (
+                        <>
+                          <span className="mr-1.5 text-(--color-muted-foreground) line-through">
+                            {formatCurrency(cart.handlingChargeOriginalAmount)}
+                          </span>
+                          Free
+                        </>
+                      ) : (
+                        formatCurrency(cart.handlingCharge)
+                      )}
+                    </span>
+                  </div>
                   <div className="flex justify-between">
                     <span className="text-(--color-muted-foreground)">Delivery fee</span>
-                    <span className="text-(--color-foreground)">{formatCurrency(cart.deliveryFee)}</span>
+                    <span className="text-(--color-foreground)">
+                      {cart.deliveryFee === 0 && cart.deliveryFeeOriginalAmount > 0 ? (
+                        <>
+                          <span className="mr-1.5 text-(--color-muted-foreground) line-through">
+                            {formatCurrency(cart.deliveryFeeOriginalAmount)}
+                          </span>
+                          Free
+                        </>
+                      ) : cart.deliveryFee === 0 ? (
+                        'Free'
+                      ) : (
+                        formatCurrency(cart.deliveryFee)
+                      )}
+                    </span>
                   </div>
                   <div className="flex justify-between border-t border-(--color-border) pt-2 font-semibold text-(--color-foreground)">
                     <span>Total</span>

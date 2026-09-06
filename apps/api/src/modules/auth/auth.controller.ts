@@ -17,6 +17,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-request';
 import { parseDurationSeconds } from '../../common/utils/duration';
 import { AuthService, type SessionTokens } from './auth.service';
+import { CartService } from '../cart/cart.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -26,10 +27,14 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 
 const ACCESS_COOKIE = 'access_token';
 const REFRESH_COOKIE = 'refresh_token';
+const GUEST_CART_COOKIE = 'cart_id';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly cartService: CartService,
+  ) {}
 
   @Post('register')
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
@@ -50,6 +55,7 @@ export class AuthController {
       req.headers['user-agent'] ?? 'unknown',
     );
     this.setAuthCookies(res, tokens);
+    await this.mergeGuestCart(req, res, user.id);
     return user;
   }
 
@@ -196,5 +202,17 @@ export class AuthController {
   private clearAuthCookies(res: Response): void {
     res.clearCookie(ACCESS_COOKIE);
     res.clearCookie(REFRESH_COOKIE, { path: '/api/v1/auth' });
+  }
+
+  // Folds a guest cart (if any) into the now-authenticated user's cart, then
+  // clears the guest cookie — the guest cart is MERGED, not deleted, but the
+  // cookie no longer needs to reference it.
+  private async mergeGuestCart(req: Request, res: Response, userId: string): Promise<void> {
+    const guestCartId = req.cookies?.[GUEST_CART_COOKIE] as string | undefined;
+    if (!guestCartId) {
+      return;
+    }
+    await this.cartService.mergeGuestCartIntoUser(guestCartId, userId);
+    res.clearCookie(GUEST_CART_COOKIE);
   }
 }

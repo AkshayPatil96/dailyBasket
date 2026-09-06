@@ -2,9 +2,26 @@ export type Role = 'CUSTOMER' | 'DELIVERY_PARTNER' | 'ADMIN' | 'SUPER_ADMIN';
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
 
-export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+export type OrderStatus =
+  | 'PENDING_PAYMENT'
+  | 'PAYMENT_FAILED'
+  | 'CONFIRMED'
+  | 'PROCESSING'
+  | 'PACKED'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'CANCELLED';
 
-export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
+export type PaymentStatus =
+  | 'CREATED'
+  | 'PENDING'
+  | 'AUTHORIZED'
+  | 'CAPTURED'
+  | 'FAILED'
+  | 'REFUNDED'
+  | 'PARTIALLY_REFUNDED';
+
+export type CheckoutSessionStatus = 'PENDING' | 'AWAITING_PAYMENT' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 
 export type DeliveryStatus = 'ASSIGNED' | 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERED' | 'FAILED';
 
@@ -90,6 +107,8 @@ export interface ProductVariant {
   price: string;
   compareAtPrice?: string | null;
   status: VariantStatus;
+  /** Only present on admin responses (adminFindOne/adminList) — customer-facing includes omit it. */
+  inventory?: { quantity: number; reservedQuantity: number; reorderLevel: number };
 }
 
 export interface CategoryBrief {
@@ -139,23 +158,132 @@ export interface ProductDetail {
   updatedAt?: string | null;
 }
 
-export interface OrderItem {
-  productId: string;
+export interface CartItemSummary {
+  id: string;
+  variantId: string;
   quantity: number;
-  unitPrice: number;
+  /** Current catalog price — the cart never persists a price snapshot, see AGENTS.md cart doc. */
+  currentPrice: number;
+  lineTotal: number;
+  product: { id: string; name: string; slug: string; imageUrl: string | null };
+  variant: {
+    id: string;
+    label: string;
+    unit: Unit;
+    price: number;
+    compareAtPrice: number | null;
+    status: VariantStatus;
+  };
+  availability: { inStock: boolean; availableQuantity: number };
+}
+
+/** Calculated view returned by every /cart endpoint — backend is the totals authority. */
+export interface CartSummary {
+  cartId: string | null;
+  items: CartItemSummary[];
+  itemCount: number;
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+}
+
+export interface OrderItem {
+  id: string;
+  orderId: string;
+  productId: string;
+  variantId: string;
+  productNameSnapshot: string;
+  variantNameSnapshot: string;
+  skuSnapshot: string;
+  quantity: number;
+  /** Prisma Decimal — serialized as a string over JSON, not a number. */
+  unitPrice: string;
+  discount: string;
+  lineTotal: string;
 }
 
 export interface Order {
   id: string;
-  userId: string;
-  addressId: string;
+  userId?: string | null;
+  addressId?: string | null;
+  couponId?: string | null;
+  recipientName: string;
+  phone: string;
+  line1: string;
+  line2?: string | null;
+  landmark?: string | null;
+  city: string;
+  state: string;
+  country: string;
+  postalCode: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  formattedAddress?: string | null;
+  guestEmail?: string | null;
   status: OrderStatus;
-  subtotal: number;
-  deliveryFee: number;
-  discount: number;
-  total: number;
-  items: OrderItem[];
+  subtotal: string;
+  discount: string;
+  deliveryFee: string;
+  tax: string;
+  total: string;
   createdAt: string;
+  updatedAt?: string | null;
+  items: OrderItem[];
+  payment?: Payment | null;
+}
+
+export interface Payment {
+  id: string;
+  orderId?: string | null;
+  checkoutSessionId?: string | null;
+  provider: string;
+  providerOrderId?: string | null;
+  providerPaymentId?: string | null;
+  status: PaymentStatus;
+  /** Prisma Decimal — serialized as a string over JSON, not a number. */
+  amount: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface CheckoutSession {
+  id: string;
+  cartId: string;
+  userId?: string | null;
+  guestEmail?: string | null;
+  status: CheckoutSessionStatus;
+  savedAddressId?: string | null;
+  recipientName?: string | null;
+  phone?: string | null;
+  line1?: string | null;
+  line2?: string | null;
+  landmark?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  postalCode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  formattedAddress?: string | null;
+  subtotal: string;
+  discount: string;
+  deliveryFee: string;
+  tax: string;
+  total: string;
+  orderId?: string | null;
+  expiresAt: string;
+  reservationExpiresAt?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+/** Response of POST /checkout/payment/create — feeds the Razorpay Checkout widget directly. */
+export interface CreatePaymentResult {
+  checkoutSessionId: string;
+  razorpayOrderId: string;
+  razorpayKeyId: string;
+  amount: number;
+  currency: string;
 }
 
 export interface ApiError {

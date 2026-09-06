@@ -8,10 +8,12 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  ShoppingCart,
   User,
   ChevronDown,
 } from "lucide-react";
 import { useCurrentUser, useLogout } from "@/hooks/use-current-user";
+import { useCart } from "@/hooks/use-cart";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import {
@@ -35,6 +37,7 @@ export function SiteHeader() {
   const pathname = usePathname();
   const { user, isLoading, isAuthenticated } = useCurrentUser();
   const logoutMutation = useLogout();
+  const { itemCount } = useCart();
 
   if (
     CUSTOMER_CHROME_HIDDEN_PREFIXES.some((prefix) =>
@@ -64,6 +67,18 @@ export function SiteHeader() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          <Link
+            href="/cart"
+            className="relative flex size-9 items-center justify-center rounded-full text-foreground hover:bg-muted"
+          >
+            <ShoppingCart className="size-5" aria-hidden />
+            {itemCount > 0 ? (
+              <span className="absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                {itemCount > 9 ? "9+" : itemCount}
+              </span>
+            ) : null}
+            <span className="sr-only">Cart</span>
+          </Link>
           {isLoading ? (
             <Loader2
               className="size-4 animate-spin text-muted-foreground"

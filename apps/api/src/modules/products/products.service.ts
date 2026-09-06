@@ -50,10 +50,15 @@ const PRODUCT_DETAIL_INCLUDE = {
 } satisfies Prisma.ProductInclude;
 
 // Admin views see every status, not just what's ACTIVE and customer-facing.
+// Variants carry their Inventory row too, so the admin edit form can show
+// and edit current stock — customer-facing includes deliberately don't.
 const PRODUCT_ADMIN_INCLUDE = {
   category: true,
   images: { orderBy: { sortOrder: 'asc' as const } },
-  variants: { orderBy: { createdAt: 'asc' as const } },
+  variants: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { inventory: true },
+  },
 } satisfies Prisma.ProductInclude;
 
 // Same shape as PRODUCT_CARD_INCLUDE but only surfaces variants that actually
@@ -373,7 +378,11 @@ export class ProductsService {
         },
       });
       await tx.inventory.create({
-        data: { variantId: created.id, quantity: 0 },
+        data: {
+          variantId: created.id,
+          quantity: dto.stockQuantity ?? 0,
+          reorderLevel: dto.reorderLevel,
+        },
       });
       return created;
     });
@@ -409,6 +418,12 @@ export class ProductsService {
         status: dto.status,
       },
     });
+    if (dto.stockQuantity !== undefined || dto.reorderLevel !== undefined) {
+      await this.prisma.inventory.update({
+        where: { variantId: id },
+        data: { quantity: dto.stockQuantity, reorderLevel: dto.reorderLevel },
+      });
+    }
     await this.invalidateDetailCache(variant.productId);
     return updated;
   }

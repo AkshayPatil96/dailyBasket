@@ -54,6 +54,8 @@ export interface VariantInput {
   price: number;
   compareAtPrice?: number;
   status?: VariantStatus;
+  stockQuantity?: number;
+  reorderLevel?: number;
 }
 
 export const adminCategoriesApi = {

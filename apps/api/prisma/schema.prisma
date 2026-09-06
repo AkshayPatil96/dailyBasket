@@ -26,19 +26,32 @@ enum AddressLabel {
 }
 
 enum OrderStatus {
-  PENDING
+  PENDING_PAYMENT
+  PAYMENT_FAILED
   CONFIRMED
-  PREPARING
+  PROCESSING
+  PACKED
   OUT_FOR_DELIVERY
   DELIVERED
   CANCELLED
 }
 
 enum PaymentStatus {
+  CREATED
   PENDING
-  PAID
+  AUTHORIZED
+  CAPTURED
   FAILED
   REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum CheckoutSessionStatus {
+  PENDING
+  AWAITING_PAYMENT
+  COMPLETED
+  EXPIRED
+  CANCELLED
 }
 
 enum DeliveryStatus {
@@ -85,6 +98,12 @@ enum DietaryTag {
   SUGAR_FREE
 }
 
+enum CartStatus {
+  ACTIVE
+  MERGED
+  CONVERTED
+}
+
 model User {
   id              String     @id @default(uuid())
   firstName       String     @map("first_name")
@@ -105,6 +124,8 @@ model User {
 
   addresses               Address[]
   orders                  Order[]
+  carts                   Cart[]
+  checkoutSessions        CheckoutSession[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
 
@@ -251,8 +272,11 @@ model ProductVariant {
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
 
-  product   Product    @relation(fields: [productId], references: [id])
-  inventory Inventory?
+  product              Product               @relation(fields: [productId], references: [id])
+  inventory            Inventory?
+  cartItems            CartItem[]
+  orderItems           OrderItem[]
+  checkoutReservations CheckoutReservation[]
 
   @@index([productId])
   @@map("product_variants")
@@ -272,6 +296,39 @@ model Inventory {
   @@map("inventory")
 }
 
+model Cart {
+  id        String     @id @default(uuid())
+  // Null for a guest cart, identified instead by the cart's own id carried
+  // as an opaque value in an HTTP-only cookie — see AGENTS.md cart doc.
+  userId    String?    @map("user_id")
+  status    CartStatus @default(ACTIVE)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime?  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user             User?             @relation(fields: [userId], references: [id])
+  items            CartItem[]
+  checkoutSessions CheckoutSession[]
+
+  @@index([userId])
+  @@map("carts")
+}
+
+model CartItem {
+  id        String    @id @default(uuid())
+  cartId    String    @map("cart_id")
+  variantId String    @map("variant_id")
+  quantity  Int
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz
+
+  cart    Cart           @relation(fields: [cartId], references: [id])
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@unique([cartId, variantId])
+  @@index([cartId])
+  @@map("cart_items")
+}
+
 model Coupon {
   id            String    @id @default(uuid())
   code          String    @unique
@@ -288,54 +345,160 @@ model Coupon {
 }
 
 model Order {
-  id          String      @id @default(uuid())
-  userId      String      @map("user_id")
-  addressId   String      @map("address_id")
-  couponId    String?     @map("coupon_id")
-  status      OrderStatus @default(PENDING)
+  id        String  @id @default(uuid())
+  // Null for a guest order — see CheckoutSession for the same guest/user split as Cart.
+  userId    String? @map("user_id")
+  // Traceability only — the fields below are the authoritative snapshot per
+  // AGENTS.md/checkout doc, since a saved address can change or be deleted later.
+  addressId String? @map("address_id")
+  couponId  String? @map("coupon_id")
+
+  recipientName    String  @map("recipient_name")
+  phone            String
+  line1            String
+  line2            String?
+  landmark         String?
+  city             String
+  state            String
+  country          String  @default("India")
+  postalCode       String  @map("postal_code")
+  latitude         Float?
+  longitude        Float?
+  formattedAddress String? @map("formatted_address")
+
+  // Contact for a guest order — authenticated orders use user.email instead.
+  guestEmail String? @map("guest_email")
+
+  status      OrderStatus @default(CONFIRMED)
   subtotal    Decimal     @db.Decimal(10, 2)
-  deliveryFee Decimal     @default(0) @map("delivery_fee") @db.Decimal(10, 2)
   discount    Decimal     @default(0) @db.Decimal(10, 2)
+  deliveryFee Decimal     @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  tax         Decimal     @default(0) @db.Decimal(10, 2)
   total       Decimal     @db.Decimal(10, 2)
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt   DateTime?   @updatedAt @map("updated_at") @db.Timestamptz
 
-  user     User        @relation(fields: [userId], references: [id])
-  address  Address     @relation(fields: [addressId], references: [id])
-  coupon   Coupon?     @relation(fields: [couponId], references: [id])
-  items    OrderItem[]
-  payment  Payment?
-  delivery Delivery?
+  user            User?            @relation(fields: [userId], references: [id])
+  address         Address?         @relation(fields: [addressId], references: [id])
+  coupon          Coupon?          @relation(fields: [couponId], references: [id])
+  items           OrderItem[]
+  payment         Payment?
+  delivery        Delivery?
+  checkoutSession CheckoutSession?
 
   @@map("orders")
 }
 
 model OrderItem {
-  id        String  @id @default(uuid())
-  orderId   String  @map("order_id")
-  productId String  @map("product_id")
+  id        String @id @default(uuid())
+  orderId   String @map("order_id")
+  productId String @map("product_id")
+  variantId String @map("variant_id")
+
+  // Snapshots — an order is a historical record, catalog data is mutable.
+  productNameSnapshot String @map("product_name_snapshot")
+  variantNameSnapshot String @map("variant_name_snapshot")
+  skuSnapshot         String @map("sku_snapshot")
+
   quantity  Int
   unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
+  discount  Decimal @default(0) @db.Decimal(10, 2)
+  lineTotal Decimal @map("line_total") @db.Decimal(10, 2)
 
-  order   Order   @relation(fields: [orderId], references: [id])
-  product Product @relation(fields: [productId], references: [id])
+  order   Order          @relation(fields: [orderId], references: [id])
+  product Product        @relation(fields: [productId], references: [id])
+  variant ProductVariant @relation(fields: [variantId], references: [id])
 
   @@map("order_items")
 }
 
 model Payment {
-  id            String        @id @default(uuid())
-  orderId       String        @unique @map("order_id")
-  provider      String        @default("razorpay")
-  providerRefId String?       @map("provider_ref_id")
-  status        PaymentStatus @default(PENDING)
-  amount        Decimal       @db.Decimal(10, 2)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt     DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
+  id                String        @id @default(uuid())
+  // Nullable + independently locatable via checkoutSessionId — a payment can
+  // capture before the Order row exists (see checkout doc: "payment succeeds
+  // but order creation fails must be recoverable").
+  orderId           String?       @unique @map("order_id")
+  checkoutSessionId String?       @unique @map("checkout_session_id")
+  provider          String        @default("razorpay")
+  providerOrderId   String?       @unique @map("provider_order_id")
+  providerPaymentId String?       @unique @map("provider_payment_id")
+  status            PaymentStatus @default(CREATED)
+  amount            Decimal       @db.Decimal(10, 2)
+  metadata          Json?
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime?     @updatedAt @map("updated_at") @db.Timestamptz
 
-  order Order @relation(fields: [orderId], references: [id])
+  order           Order?           @relation(fields: [orderId], references: [id])
+  checkoutSession CheckoutSession? @relation(fields: [checkoutSessionId], references: [id])
 
   @@map("payments")
+}
+
+model CheckoutSession {
+  id         String                @id @default(uuid())
+  cartId     String                @map("cart_id")
+  userId     String?               @map("user_id")
+  guestEmail String?               @map("guest_email")
+  status     CheckoutSessionStatus @default(PENDING)
+
+  // Address snapshot — set via POST /checkout/address, either copied from a
+  // saved Address or guest-entered directly. Same shape as Order's snapshot.
+  savedAddressId   String? @map("saved_address_id")
+  recipientName    String? @map("recipient_name")
+  phone            String?
+  line1            String?
+  line2            String?
+  landmark         String?
+  city             String?
+  state            String?
+  country          String? @default("India")
+  postalCode       String? @map("postal_code")
+  latitude         Float?
+  longitude        Float?
+  formattedAddress String? @map("formatted_address")
+
+  subtotal    Decimal @default(0) @db.Decimal(10, 2)
+  discount    Decimal @default(0) @db.Decimal(10, 2)
+  deliveryFee Decimal @default(0) @map("delivery_fee") @db.Decimal(10, 2)
+  tax         Decimal @default(0) @db.Decimal(10, 2)
+  total       Decimal @default(0) @db.Decimal(10, 2)
+
+  orderId String? @unique @map("order_id")
+
+  // Session expiry (~15 min) and reservation expiry (~10 min) are separate
+  // per the checkout doc — the reservation can lapse first, forcing
+  // re-validation, even while the session itself is still alive.
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz
+  reservationExpiresAt DateTime? @map("reservation_expires_at") @db.Timestamptz
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime? @updatedAt @map("updated_at") @db.Timestamptz
+
+  cart         Cart                  @relation(fields: [cartId], references: [id])
+  user         User?                 @relation(fields: [userId], references: [id])
+  order        Order?                @relation(fields: [orderId], references: [id])
+  payment      Payment?
+  reservations CheckoutReservation[]
+
+  @@index([userId])
+  @@index([cartId])
+  @@map("checkout_sessions")
+}
+
+model CheckoutReservation {
+  id                String  @id @default(uuid())
+  checkoutSessionId String  @map("checkout_session_id")
+  variantId         String  @map("variant_id")
+  quantity          Int
+  // Price at the moment stock was reserved — this is what Razorpay actually
+  // charged, so order creation reads it back instead of re-deriving from the
+  // (possibly since-changed) live catalog price.
+  unitPrice         Decimal @map("unit_price") @db.Decimal(10, 2)
+
+  checkoutSession CheckoutSession @relation(fields: [checkoutSessionId], references: [id])
+  variant         ProductVariant  @relation(fields: [variantId], references: [id])
+
+  @@unique([checkoutSessionId, variantId])
+  @@map("checkout_reservations")
 }
 
 model Delivery {

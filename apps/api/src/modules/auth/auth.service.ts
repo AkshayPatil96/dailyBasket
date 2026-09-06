@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import type { User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
 import { SessionService } from './session.service';
@@ -69,7 +70,7 @@ export class AuthService {
   async login(
     dto: LoginDto,
     userAgent: string,
-  ): Promise<{ user: ReturnType<typeof toSafeUser>; tokens: SessionTokens }> {
+  ): Promise<{ user: Omit<User, 'passwordHash'>; tokens: SessionTokens }> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });

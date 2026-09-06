@@ -17,6 +17,7 @@ import { HomeModule } from './modules/home/home.module';
 import { CartModule } from './modules/cart/cart.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { CheckoutModule } from './modules/checkout/checkout.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
@@ -53,6 +54,7 @@ import { validateEnv } from './config/env.validation';
     CartModule,
     OrdersModule,
     PaymentsModule,
+    CheckoutModule,
     InventoryModule,
     DeliveryModule,
     CouponsModule,

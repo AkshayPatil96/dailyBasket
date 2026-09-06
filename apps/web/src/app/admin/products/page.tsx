@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef, PaginationState, SortingState } from '@tanstack/react-table';
-import { Lock, Plus, Trash2 } from 'lucide-react';
+import { Lock, Plus, TriangleAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { ProductDetail, ProductStatus } from '@grocery-delivery/types';
 import { adminProductsApi } from '@/lib/admin-catalog-api';
@@ -121,11 +121,29 @@ export default function AdminProductsPage() {
         id: 'variants',
         header: 'Variants',
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="text-(--color-muted-foreground)">
-            {row.original.variants.length}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const lowStock = row.original.variants.some(
+            (variant) =>
+              variant.status === 'ACTIVE' &&
+              variant.inventory &&
+              variant.inventory.quantity <= variant.inventory.reorderLevel,
+          );
+          return (
+            <div className="flex items-center gap-1.5">
+              <span className="text-(--color-muted-foreground)">
+                {row.original.variants.length}
+              </span>
+              {lowStock ? (
+                <span title="At or below reorder level">
+                  <TriangleAlert
+                    className="size-3.5 shrink-0 text-(--color-destructive)"
+                    aria-hidden
+                  />
+                </span>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         accessorKey: 'status',

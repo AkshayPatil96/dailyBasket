@@ -2,6 +2,7 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { AuthController } from '../auth.controller';
 import { AuthService } from '../auth.service';
+import type { CartService } from '../../cart/cart.service';
 import { AuthenticatedUser } from '../../../common/types/authenticated-request';
 
 describe('AuthController', () => {
@@ -20,6 +21,7 @@ describe('AuthController', () => {
     changePassword: jest.Mock;
     deleteAccount: jest.Mock;
   };
+  let cartService: { mergeGuestCartIntoUser: jest.Mock };
   let res: { cookie: jest.Mock; clearCookie: jest.Mock };
 
   const currentUser: AuthenticatedUser = {
@@ -50,8 +52,12 @@ describe('AuthController', () => {
       changePassword: jest.fn(),
       deleteAccount: jest.fn(),
     };
+    cartService = { mergeGuestCartIntoUser: jest.fn() };
     res = { cookie: jest.fn(), clearCookie: jest.fn() };
-    controller = new AuthController(authService as unknown as AuthService);
+    controller = new AuthController(
+      authService as unknown as AuthService,
+      cartService as unknown as CartService,
+    );
   });
 
   it('register delegates to the service', async () => {

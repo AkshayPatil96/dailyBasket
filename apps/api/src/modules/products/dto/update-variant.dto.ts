@@ -42,4 +42,17 @@ export class UpdateVariantDto {
   @IsOptional()
   @IsEnum(VariantStatus)
   status?: VariantStatus;
+
+  // Sets the linked Inventory row's quantity to this exact value (a correction,
+  // not a delta) — see AGENTS.md/cart doc: stock is validated at cart/checkout
+  // time from this Inventory row, not from a field on the variant itself.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  stockQuantity?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  reorderLevel?: number;
 }

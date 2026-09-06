@@ -38,8 +38,10 @@ export function VariantForm({
             ? Number(initialValues.compareAtPrice)
             : undefined,
           status: initialValues.status,
+          stockQuantity: initialValues.inventory?.quantity ?? 0,
+          reorderLevel: initialValues.inventory?.reorderLevel ?? 10,
         }
-      : { unit: 'PIECE' },
+      : { unit: 'PIECE', stockQuantity: 0, reorderLevel: 10 },
   });
 
   return (
@@ -95,6 +97,28 @@ export function VariantForm({
           type="number"
           step="0.01"
           {...register('compareAtPrice', { valueAsNumber: true })}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <FormField
+          label="Stock quantity"
+          type="number"
+          error={errors.stockQuantity?.message}
+          required
+          {...register('stockQuantity', {
+            required: 'stockQuantity is required',
+            valueAsNumber: true,
+            min: { value: 0, message: 'stockQuantity cannot be negative' },
+          })}
+        />
+        <FormField
+          label="Reorder level"
+          type="number"
+          error={errors.reorderLevel?.message}
+          {...register('reorderLevel', {
+            valueAsNumber: true,
+            min: { value: 0, message: 'reorderLevel cannot be negative' },
+          })}
         />
       </div>
       {initialValues ? (

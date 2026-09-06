@@ -42,4 +42,18 @@ export class CreateVariantDto {
   @IsNumber()
   @Min(0)
   compareAtPrice?: number;
+
+  // Seeds the linked Inventory row — without this every new variant starts
+  // at 0 stock and shows as out of stock everywhere until manually adjusted.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  stockQuantity?: number;
+
+  // Low-stock threshold for the admin "low stock" badge — omit to use the
+  // schema default (10).
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  reorderLevel?: number;
 }

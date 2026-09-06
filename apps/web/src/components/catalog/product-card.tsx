@@ -1,12 +1,59 @@
+'use client';
+
 import Image from 'next/image';
 import Link from 'next/link';
-import { Package } from 'lucide-react';
+import { Loader2, Minus, Package, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import type { ProductSummary } from '@grocery-delivery/types';
+import { useCart, useAddToCart, useUpdateCartItem, useRemoveCartItem } from '@/hooks/use-cart';
+import { getApiErrorMessage } from '@/lib/api-client';
 
 export function ProductCard({ product }: { product: ProductSummary }) {
   const primaryImage = product.images[0];
   const cheapestVariant = product.variants[0];
+  const { cart } = useCart();
+  const addToCart = useAddToCart();
+  const updateItem = useUpdateCartItem();
+  const removeItem = useRemoveCartItem();
+  const cartItem = cheapestVariant
+    ? cart?.items.find((item) => item.variantId === cheapestVariant.id)
+    : undefined;
+  const isMutating = addToCart.isPending || updateItem.isPending || removeItem.isPending;
+
+  const onCartError = (error: unknown) =>
+    toast.error(getApiErrorMessage(error, 'Could not update your cart.'));
+
+  const handleAdd = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (cheapestVariant) {
+      addToCart.mutate({ variantId: cheapestVariant.id }, { onError: onCartError });
+    }
+  };
+
+  const handleIncrement = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (cheapestVariant) {
+      addToCart.mutate({ variantId: cheapestVariant.id, quantity: 1 }, { onError: onCartError });
+    }
+  };
+
+  const handleDecrement = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!cartItem) return;
+    if (cartItem.quantity <= 1) {
+      removeItem.mutate(cartItem.id, { onError: onCartError });
+    } else {
+      updateItem.mutate(
+        { itemId: cartItem.id, quantity: cartItem.quantity - 1 },
+        { onError: onCartError },
+      );
+    }
+  };
+
   const discountPercent =
     cheapestVariant?.compareAtPrice &&
     Number(cheapestVariant.compareAtPrice) > Number(cheapestVariant.price)
@@ -39,6 +86,49 @@ export function ProductCard({ product }: { product: ProductSummary }) {
             <Package className="size-8 text-(--color-muted-foreground)" aria-hidden />
           </div>
         )}
+
+        {cheapestVariant ? (
+          <div className="absolute -bottom-3 right-1.5 z-10">
+            {cartItem ? (
+              <div className="flex items-center gap-1 rounded-lg border border-(--color-primary) bg-(--color-card) px-0.5 py-1 shadow-sm">
+                <button
+                  type="button"
+                  disabled={isMutating}
+                  onClick={handleDecrement}
+                  className="flex size-5 shrink-0 items-center justify-center text-(--color-primary) disabled:opacity-50"
+                >
+                  <Minus className="size-3" aria-hidden />
+                  <span className="sr-only">Remove one</span>
+                </button>
+                <span className="min-w-[1ch] text-center text-xs font-semibold text-(--color-primary)">
+                  {cartItem.quantity}
+                </span>
+                <button
+                  type="button"
+                  disabled={isMutating}
+                  onClick={handleIncrement}
+                  className="flex size-5 shrink-0 items-center justify-center text-(--color-primary) disabled:opacity-50"
+                >
+                  <Plus className="size-3" aria-hidden />
+                  <span className="sr-only">Add one more</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={isMutating}
+                onClick={handleAdd}
+                className="flex items-center justify-center rounded-lg border border-(--color-primary) bg-(--color-card) px-3 py-1 text-xs font-semibold text-(--color-primary) shadow-sm transition-colors hover:bg-(--color-primary)/5 disabled:opacity-50"
+              >
+                {addToCart.isPending ? (
+                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                ) : (
+                  'ADD'
+                )}
+              </button>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col gap-0.5 p-2">

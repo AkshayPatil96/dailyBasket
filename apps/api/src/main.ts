@@ -7,7 +7,10 @@ import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: needed to verify the Razorpay webhook signature, which is
+  // computed over the exact raw request bytes — a JSON-parsed-then-reserialized
+  // body would not reproduce the same bytes and the signature check would fail.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   const configService = app.get(ConfigService);
 

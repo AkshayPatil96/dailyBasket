@@ -19,6 +19,7 @@ import { ConfigService } from '@nestjs/config';
 
 const SALT_ROUNDS = 12;
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const RESEND_VERIFICATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between sends per user
 const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const hashToken = (token: string) =>
@@ -244,11 +245,23 @@ export class AuthService {
   async resendVerification(email: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (user && !user.emailVerifiedAt && !user.deletedAt) {
-      await this.issueEmailVerificationToken(
-        user.id,
-        user.email,
-        user.firstName,
-      );
+      const lastToken = await this.prisma.emailVerificationToken.findFirst({
+        where: { userId: user.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const cooledDown =
+        !lastToken ||
+        Date.now() - lastToken.createdAt.getTime() >= RESEND_VERIFICATION_COOLDOWN_MS;
+      // Silently skips instead of throwing — the response must stay identical
+      // to the "not found"/"already verified" cases below, or a rapid
+      // double-click would leak "this email exists" via a different error.
+      if (cooledDown) {
+        await this.issueEmailVerificationToken(
+          user.id,
+          user.email,
+          user.firstName,
+        );
+      }
     }
     // Always resolves the same way regardless of match, to avoid leaking which emails are registered.
   }

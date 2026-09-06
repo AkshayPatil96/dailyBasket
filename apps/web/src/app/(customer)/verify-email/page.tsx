@@ -5,13 +5,14 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import {
   resendVerificationSchema,
   type ResendVerificationInput,
 } from '@grocery-delivery/validation';
 import { authApi, getApiErrorMessage } from '@/lib/api-client';
+import { currentUserQueryKey, useCurrentUser } from '@/hooks/use-current-user';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 
@@ -25,7 +26,15 @@ export default function VerifyEmailPage() {
 
 function VerifyEmailStatus() {
   const token = useSearchParams().get('token');
-  const verifyMutation = useMutation({ mutationFn: authApi.verifyEmail });
+  const queryClient = useQueryClient();
+  const { isAuthenticated } = useCurrentUser();
+  const verifyMutation = useMutation({
+    mutationFn: authApi.verifyEmail,
+    // Refreshes the cached user (emailVerifiedAt) so /account reflects the
+    // change immediately if the caller was already logged in when they
+    // opened this link — no full page reload needed.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: currentUserQueryKey }),
+  });
 
   useEffect(() => {
     if (token) verifyMutation.mutate({ token });
@@ -65,10 +74,10 @@ function VerifyEmailStatus() {
           Your account is confirmed. You&apos;re ready to shop.
         </p>
         <Link
-          href="/login"
+          href={isAuthenticated ? '/account' : '/login'}
           className="mt-2 text-sm font-medium text-[var(--color-primary)] hover:text-[var(--color-primary-hover)]"
         >
-          Back to sign in
+          {isAuthenticated ? 'Back to your account' : 'Back to sign in'}
         </Link>
       </div>
     );

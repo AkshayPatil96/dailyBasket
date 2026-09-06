@@ -43,12 +43,24 @@ export default function ProfilePage() {
   );
 }
 
+const RESEND_COOLDOWN_SECONDS = 5 * 60;
+
 function ProfileForm() {
   const queryClient = useQueryClient();
   const { user } = useCurrentUser();
   const [firstName, setFirstName] = useState(user?.firstName ?? '');
   const [lastName, setLastName] = useState(user?.lastName ?? '');
   const [phone, setPhone] = useState(user?.phone ?? '');
+  // Local-only, resets on reload — the real gate lives server-side
+  // (resendVerification silently no-ops within the cooldown window), this
+  // just stops an obvious same-session double-click and shows a countdown.
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown === 0) return;
+    const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   useEffect(() => {
     if (user) {
@@ -65,6 +77,18 @@ function ProfileForm() {
       toast.success('Profile updated');
     },
     onError: (error) => toast.error(getApiErrorMessage(error, 'Could not update profile.')),
+  });
+
+  const resendMutation = useMutation({
+    mutationFn: (email: string) => authApi.resendVerification({ email }),
+    onSuccess: () => {
+      toast.success('Check your inbox for the verification link.', {
+        description: 'Link is valid for 24 hours.',
+      });
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
+    },
+    onError: (error) =>
+      toast.error(getApiErrorMessage(error, 'Could not send verification email.')),
   });
 
   if (!user) {
@@ -86,7 +110,24 @@ function ProfileForm() {
         </span>
       </div>
 
-      <FormField label="Email" value={user.email} disabled readOnly />
+      <div className="flex items-end gap-2">
+        <div className="flex-1">
+          <FormField label="Email" value={user.email} disabled readOnly />
+        </div>
+        {!user.emailVerifiedAt ? (
+          <Button
+            type="button"
+            variant="link"
+            disabled={resendCooldown > 0}
+            loading={resendMutation.isPending}
+            onClick={() => resendMutation.mutate(user.email)}
+          >
+            {resendCooldown > 0
+              ? `Resend in ${Math.floor(resendCooldown / 60)}:${String(resendCooldown % 60).padStart(2, '0')}`
+              : 'Verify email'}
+          </Button>
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 gap-4">
         <FormField
           label="First name"

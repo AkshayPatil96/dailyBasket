@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { ResendModule } from 'nestjs-resend';
 import { NotificationsController } from './notifications.controller';
 import { NotificationsService } from './notifications.service';
@@ -7,6 +8,7 @@ import { EmailService } from './email.service';
 
 @Module({
   imports: [
+    JwtModule.register({}),
     ResendModule.forRootAsync({
       useFactory: (configService: ConfigService) => ({
         // Resend's client throws at construction if no key is resolvable at all (including

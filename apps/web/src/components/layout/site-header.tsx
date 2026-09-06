@@ -18,6 +18,7 @@ import { useCurrentUser, useLogout } from "@/hooks/use-current-user";
 import { useCart } from "@/hooks/use-cart";
 import { buttonVariants } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { NotificationsBell } from "@/components/layout/notifications-bell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,6 +82,7 @@ export function SiteHeader() {
             ) : null}
             <span className="sr-only">Cart</span>
           </Link>
+          {isAuthenticated ? <NotificationsBell /> : null}
           {isLoading ? (
             <Loader2
               className="size-4 animate-spin text-muted-foreground"

@@ -151,8 +151,37 @@ model User {
   checkoutSessions        CheckoutSession[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
+  notifications           Notification[]
 
   @@map("users")
+}
+
+enum NotificationType {
+  ORDER_CONFIRMED
+  ORDER_PACKED
+  ORDER_OUT_FOR_DELIVERY
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+}
+
+// In-app only — authenticated customers only (dailybasket-orders-order-tracking.md
+// §18: "recommended initial channels: Email, In-app"). Guests get email only,
+// since there's no account to attach a feed to.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  message   String
+  orderId   String?          @map("order_id")
+  readAt    DateTime?        @map("read_at") @db.Timestamptz
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user  User   @relation(fields: [userId], references: [id])
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@index([userId])
+  @@map("notifications")
 }
 
 model EmailVerificationToken {
@@ -412,6 +441,7 @@ model Order {
   payment         Payment?
   delivery        Delivery?
   events          OrderEvent[]
+  notifications   Notification[]
   checkoutSession CheckoutSession?
 
   @@map("orders")

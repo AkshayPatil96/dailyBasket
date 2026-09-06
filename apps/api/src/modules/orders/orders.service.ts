@@ -2,10 +2,21 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { DeliveryStatus, Order, OrderEventActor, OrderEventType, OrderStatus, Prisma } from '@prisma/client';
+import {
+  DeliveryStatus,
+  NotificationType,
+  Order,
+  OrderEventActor,
+  OrderEventType,
+  OrderStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../notifications/email.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AdminListOrdersDto } from './dto/admin-list-orders.dto';
 
 const ORDER_DETAIL_INCLUDE = {
@@ -70,9 +81,66 @@ function deliveryUpdateFor(status: DeliveryStatus): DeliveryStatusFields {
   }
 }
 
+// Which manual transitions notify the customer, and how — deliberately
+// excludes PROCESSING/PICKING_STARTED (internal, not customer-facing per
+// dailybasket-orders-order-tracking.md §15's notification examples).
+const NOTIFICATION_FOR_STATUS: Partial<Record<OrderStatus, { type: NotificationType; label: string }>> = {
+  PACKED: { type: 'ORDER_PACKED', label: 'Packed' },
+  OUT_FOR_DELIVERY: { type: 'ORDER_OUT_FOR_DELIVERY', label: 'Out for delivery' },
+  DELIVERED: { type: 'ORDER_DELIVERED', label: 'Delivered' },
+  CANCELLED: { type: 'ORDER_CANCELLED', label: 'Cancelled' },
+};
+
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly emailService: EmailService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
+
+  // Best-effort — a failed email/notification must never break order
+  // creation or a status transition that already committed successfully.
+  private async notifyOrderUpdate(order: Order, type: NotificationType, statusLabel: string): Promise<void> {
+    try {
+      let email: string | null | undefined;
+      let name = order.recipientName;
+
+      if (order.userId) {
+        const user = await this.prisma.user.findUnique({
+          where: { id: order.userId },
+          select: { email: true, firstName: true },
+        });
+        if (user) {
+          email = user.email;
+          name = user.firstName;
+          const title = type === 'ORDER_CONFIRMED' ? 'Order confirmed' : `Order ${statusLabel.toLowerCase()}`;
+          await this.notificationsService.createForUser(
+            order.userId,
+            type,
+            title,
+            `Your order ${order.orderNumber} is now ${statusLabel.toLowerCase()}.`,
+            order.id,
+          );
+        }
+      } else {
+        email = order.guestEmail;
+      }
+
+      if (!email) {
+        return;
+      }
+      if (type === 'ORDER_CONFIRMED') {
+        await this.emailService.sendOrderConfirmedEmail(email, name, order.orderNumber, Number(order.total).toFixed(2));
+      } else {
+        await this.emailService.sendOrderStatusEmail(email, name, order.orderNumber, statusLabel);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed sending notification for order ${order.id}: ${error}`);
+    }
+  }
 
   // Idempotent — a payment already linked to an order returns that order
   // instead of creating a duplicate. Called from both the client-side verify
@@ -187,6 +255,12 @@ export class OrdersService {
       await tx.cart.update({ where: { id: session.cartId }, data: { status: 'CONVERTED' } });
 
       return order;
+    }).then(async (createdOrder) => {
+      // Outside the transaction — email/notification I/O has no business
+      // being inside a DB transaction (same reasoning as never mixing a
+      // Razorpay call into one, per AGENTS.md).
+      await this.notifyOrderUpdate(createdOrder, 'ORDER_CONFIRMED', 'Confirmed');
+      return createdOrder;
     });
   }
 
@@ -360,6 +434,12 @@ export class OrdersService {
       }
 
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: ORDER_DETAIL_INCLUDE });
+    }).then(async (updatedOrder) => {
+      const notifyConfig = NOTIFICATION_FOR_STATUS[targetStatus];
+      if (notifyConfig) {
+        await this.notifyOrderUpdate(updatedOrder, notifyConfig.type, notifyConfig.label);
+      }
+      return updatedOrder;
     });
   }
 

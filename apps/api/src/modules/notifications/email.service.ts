@@ -85,6 +85,43 @@ export class EmailService {
     });
   }
 
+  async sendOrderConfirmedEmail(
+    to: string,
+    name: string,
+    orderNumber: string,
+    total: string,
+  ): Promise<void> {
+    const safeName = escapeHtml(name);
+
+    await this.send({
+      to,
+      subject: `Order confirmed — ${orderNumber}`,
+      html: `
+        <p>Hi ${safeName},</p>
+        <p>Your order <strong>${orderNumber}</strong> is confirmed. Total: ₹${total}.</p>
+        <p>We'll email you again as it's packed and on its way.</p>
+      `,
+    });
+  }
+
+  async sendOrderStatusEmail(
+    to: string,
+    name: string,
+    orderNumber: string,
+    statusLabel: string,
+  ): Promise<void> {
+    const safeName = escapeHtml(name);
+
+    await this.send({
+      to,
+      subject: `Order ${orderNumber} — ${statusLabel}`,
+      html: `
+        <p>Hi ${safeName},</p>
+        <p>Your order <strong>${orderNumber}</strong> is now <strong>${statusLabel}</strong>.</p>
+      `,
+    });
+  }
+
   async sendPasswordResetEmail(
     to: string,
     firstName: string,

@@ -54,12 +54,35 @@ enum CheckoutSessionStatus {
   CANCELLED
 }
 
+// Separate from OrderStatus on purpose (dailybasket-orders-order-tracking.md
+// §4-5) — order is a commerce concern, delivery is a logistics concern. The
+// admin status-transition endpoint advances both together for now since
+// there's no delivery-partner assignment flow yet (see delivery-partner
+// doc); once that lands, a partner can advance Delivery independently.
 enum DeliveryStatus {
-  ASSIGNED
-  PICKED_UP
-  IN_TRANSIT
+  PENDING
+  PICKING
+  PACKED
+  OUT_FOR_DELIVERY
   DELIVERED
-  FAILED
+  CANCELLED
+}
+
+enum OrderEventType {
+  ORDER_PLACED
+  PAYMENT_CONFIRMED
+  ORDER_CONFIRMED
+  PICKING_STARTED
+  ORDER_PACKED
+  OUT_FOR_DELIVERY
+  DELIVERED
+  ORDER_CANCELLED
+}
+
+enum OrderEventActor {
+  CUSTOMER
+  ADMIN
+  SYSTEM
 }
 
 enum CategoryStatus {
@@ -345,7 +368,11 @@ model Coupon {
 }
 
 model Order {
-  id        String  @id @default(uuid())
+  id String @id @default(uuid())
+  // Human-facing identifier (DB-YYYYMMDD-NNNNNN), generated from the
+  // order_number_seq Postgres sequence at creation — the UUID id is never
+  // shown to customers (dailybasket-orders-order-tracking.md §3).
+  orderNumber String @unique @map("order_number")
   // Null for a guest order — see CheckoutSession for the same guest/user split as Cart.
   userId    String? @map("user_id")
   // Traceability only — the fields below are the authoritative snapshot per
@@ -384,9 +411,26 @@ model Order {
   items           OrderItem[]
   payment         Payment?
   delivery        Delivery?
+  events          OrderEvent[]
   checkoutSession CheckoutSession?
 
   @@map("orders")
+}
+
+model OrderEvent {
+  id        String          @id @default(uuid())
+  orderId   String          @map("order_id")
+  type      OrderEventType
+  // Free-text context — e.g. the cancellation reason.
+  message   String?
+  actorType OrderEventActor @map("actor_type")
+  actorId   String?         @map("actor_id")
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("order_events")
 }
 
 model OrderItem {
@@ -502,14 +546,25 @@ model CheckoutReservation {
 }
 
 model Delivery {
-  id                String         @id @default(uuid())
-  orderId           String         @unique @map("order_id")
+  id      String @id @default(uuid())
+  orderId String @unique @map("order_id")
+
+  // Nullable — no delivery-partner assignment flow exists yet
+  // (dailybasket-delivery-partner-operations.md); set by that feature later.
   deliveryPartnerId String?        @map("delivery_partner_id")
-  status            DeliveryStatus @default(ASSIGNED)
+  status            DeliveryStatus @default(PENDING)
   currentLatitude   Float?         @map("current_latitude")
   currentLongitude  Float?         @map("current_longitude")
-  assignedAt        DateTime       @default(now()) @map("assigned_at") @db.Timestamptz
-  deliveredAt       DateTime?      @map("delivered_at") @db.Timestamptz
+  deliveryNotes     String?        @map("delivery_notes")
+
+  assignedAt       DateTime? @map("assigned_at") @db.Timestamptz
+  pickingStartedAt DateTime? @map("picking_started_at") @db.Timestamptz
+  packedAt         DateTime? @map("packed_at") @db.Timestamptz
+  outForDeliveryAt DateTime? @map("out_for_delivery_at") @db.Timestamptz
+  deliveredAt      DateTime? @map("delivered_at") @db.Timestamptz
+
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz
 
   order Order @relation(fields: [orderId], references: [id])
 

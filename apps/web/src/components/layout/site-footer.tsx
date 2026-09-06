@@ -77,6 +77,14 @@ export function SiteFooter() {
                   Create account
                 </Link>
               </li>
+              <li>
+                <Link
+                  href="/track-order"
+                  className="text-sm text-(--color-muted-foreground) hover:text-(--color-primary)"
+                >
+                  Track your order
+                </Link>
+              </li>
             </ul>
           </div>
         </div>

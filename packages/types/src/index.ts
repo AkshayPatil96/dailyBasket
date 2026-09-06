@@ -23,8 +23,6 @@ export type PaymentStatus =
 
 export type CheckoutSessionStatus = 'PENDING' | 'AWAITING_PAYMENT' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
 
-export type DeliveryStatus = 'ASSIGNED' | 'PICKED_UP' | 'IN_TRANSIT' | 'DELIVERED' | 'FAILED';
-
 export interface User {
   id: string;
   firstName: string;
@@ -202,8 +200,50 @@ export interface OrderItem {
   lineTotal: string;
 }
 
+export type DeliveryStatus = 'PENDING' | 'PICKING' | 'PACKED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+
+export type OrderEventType =
+  | 'ORDER_PLACED'
+  | 'PAYMENT_CONFIRMED'
+  | 'ORDER_CONFIRMED'
+  | 'PICKING_STARTED'
+  | 'ORDER_PACKED'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'ORDER_CANCELLED';
+
+export type OrderEventActor = 'CUSTOMER' | 'ADMIN' | 'SYSTEM';
+
+export interface Delivery {
+  id: string;
+  orderId: string;
+  deliveryPartnerId?: string | null;
+  status: DeliveryStatus;
+  currentLatitude?: number | null;
+  currentLongitude?: number | null;
+  deliveryNotes?: string | null;
+  assignedAt?: string | null;
+  pickingStartedAt?: string | null;
+  packedAt?: string | null;
+  outForDeliveryAt?: string | null;
+  deliveredAt?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface OrderEvent {
+  id: string;
+  orderId: string;
+  type: OrderEventType;
+  message?: string | null;
+  actorType: OrderEventActor;
+  actorId?: string | null;
+  createdAt: string;
+}
+
 export interface Order {
   id: string;
+  orderNumber: string;
   userId?: string | null;
   addressId?: string | null;
   couponId?: string | null;
@@ -230,6 +270,8 @@ export interface Order {
   updatedAt?: string | null;
   items: OrderItem[];
   payment?: Payment | null;
+  delivery?: Delivery | null;
+  events?: OrderEvent[];
 }
 
 export interface Payment {

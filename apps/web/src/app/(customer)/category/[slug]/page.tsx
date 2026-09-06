@@ -71,7 +71,7 @@ export default async function CategoryPage({
         <div className="flex flex-col gap-6 md:flex-row">
           <nav
             aria-label="Subcategories"
-            className="flex gap-2 overflow-x-auto pb-1 md:w-56 md:shrink-0 md:flex-col md:gap-1 md:overflow-y-auto md:overflow-x-visible md:border-r md:border-(--color-border) md:pr-4 md:pb-4 md:sticky md:top-(--header-height) md:max-h-[calc(100vh-var(--header-height)-2rem)]"
+            className="sticky top-(--header-height) z-20 -mx-4 flex gap-2 overflow-x-auto border-b border-(--color-border) bg-(--color-background) px-4 py-2 sm:-mx-6 sm:px-6 md:mx-0 md:w-56 md:shrink-0 md:flex-col md:gap-1 md:overflow-y-auto md:overflow-x-visible md:border-r md:border-b-0 md:bg-transparent md:px-0 md:pr-4 md:pb-4 md:sticky md:top-(--header-height) md:max-h-[calc(100vh-var(--header-height)-2rem)]"
           >
             {railItems.map((item) => {
               const isActive = item.name === 'All' ? isViewingAll : item.id === category.id;
@@ -87,13 +87,13 @@ export default async function CategoryPage({
                       : 'border-(--color-border) text-(--color-foreground) hover:border-(--color-primary) md:border-l-2 md:border-transparent md:hover:bg-(--color-muted)',
                   )}
                 >
-                  <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-(--color-muted)">
+                  {/* <span className="relative flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-(--color-muted)">
                     {item.imageUrl ? (
                       <Image src={item.imageUrl} alt="" fill sizes="28px" className="object-cover" />
                     ) : (
                       <Package className="size-3.5 text-(--color-muted-foreground)" aria-hidden />
                     )}
-                  </span>
+                  </span> */}
                   <span className="min-w-0 flex-1 truncate">{item.name}</span>
                 </Link>
               );

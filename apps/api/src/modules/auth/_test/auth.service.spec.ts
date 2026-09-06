@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from '../auth.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../../notifications/email.service';
+import { OrdersService } from '../../orders/orders.service';
 import { SessionService } from '../session.service';
 import { TokenService } from '../token.service';
 import { ConfigService } from '@nestjs/config';
@@ -50,6 +51,7 @@ describe('AuthService', () => {
     sendPasswordResetEmail: jest.Mock;
   };
   let configService: { getOrThrow: jest.Mock };
+  let ordersService: { linkGuestOrders: jest.Mock };
 
   const baseUser = {
     id: 'user-1',
@@ -97,6 +99,9 @@ describe('AuthService', () => {
     configService = {
       getOrThrow: jest.fn().mockReturnValue('https://app.local'),
     };
+    ordersService = {
+      linkGuestOrders: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new AuthService(
       prisma as unknown as PrismaService,
@@ -104,6 +109,7 @@ describe('AuthService', () => {
       tokenService as unknown as TokenService,
       emailService as unknown as EmailService,
       configService as unknown as ConfigService,
+      ordersService as unknown as OrdersService,
     );
   });
 

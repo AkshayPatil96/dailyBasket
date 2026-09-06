@@ -141,18 +141,13 @@ export default function CheckoutPage() {
     );
   }
 
-  if (!cart || cart.items.length === 0) {
-    router.replace('/cart');
-    return null;
-  }
-
-  return (
-    <main className="container mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
-      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
-
-      <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">Checkout</h1>
-
-      {step === 'confirmed' && confirmedOrder ? (
+  // Once the order is placed, the cart is correctly emptied server-side —
+  // render the confirmation screen from confirmedOrder before ever checking
+  // cart again, so emptying it can't bounce this page back to /cart.
+  if (step === 'confirmed' && confirmedOrder) {
+    return (
+      <main className="container mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
+        <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">Checkout</h1>
         <div className="flex flex-col items-center gap-4 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-8 text-center">
           <CheckCircle2 className="size-12 text-(--color-primary)" aria-hidden />
           <h2 className="font-display text-xl font-semibold text-(--color-foreground)">
@@ -164,12 +159,43 @@ export default function CheckoutPage() {
           {isAuthenticated ? (
             <Button onClick={() => router.push(`/orders/${confirmedOrder.id}`)}>View order</Button>
           ) : (
-            <Button onClick={() => router.push('/')}>Continue shopping</Button>
+            <>
+              <p className="text-xs text-(--color-muted-foreground)">
+                Order #{confirmedOrder.orderNumber} — save this to track your order later at{' '}
+                <span className="font-medium text-(--color-foreground)">/track-order</span>.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    router.push(
+                      `/track-order?orderNumber=${encodeURIComponent(confirmedOrder.orderNumber)}&email=${encodeURIComponent(confirmedOrder.guestEmail ?? '')}`,
+                    )
+                  }
+                >
+                  Track this order
+                </Button>
+                <Button onClick={() => router.push('/')}>Continue shopping</Button>
+              </div>
+            </>
           )}
         </div>
-      ) : (
-        <>
-          <ol className="flex items-center gap-2 text-sm text-(--color-muted-foreground)">
+      </main>
+    );
+  }
+
+  if (!cart || cart.items.length === 0) {
+    router.replace('/cart');
+    return null;
+  }
+
+  return (
+    <main className="container mx-auto flex max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
+      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="afterInteractive" />
+
+      <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">Checkout</h1>
+
+      <ol className="flex items-center gap-2 text-sm text-(--color-muted-foreground)">
             <li className={cn('font-medium', step === 'address' && 'text-(--color-primary)')}>
               1. Delivery address
             </li>
@@ -291,8 +317,6 @@ export default function CheckoutPage() {
               </div>
             </div>
           )}
-        </>
-      )}
     </main>
   );
 }

@@ -8,6 +8,8 @@ import {
   LayoutDashboard,
   LogOut,
   MapPin,
+  Heart,
+  Package,
   ShoppingCart,
   User,
   ChevronDown,
@@ -125,9 +127,21 @@ export function SiteHeader() {
                     Delivery dashboard
                   </DropdownMenuItem>
                 ) : null}
+                <DropdownMenuItem render={<Link href="/account" />}>
+                  <User aria-hidden />
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/orders" />}>
+                  <Package aria-hidden />
+                  My orders
+                </DropdownMenuItem>
                 <DropdownMenuItem render={<Link href="/account/addresses" />}>
                   <MapPin aria-hidden />
                   Addresses
+                </DropdownMenuItem>
+                <DropdownMenuItem render={<Link href="/account/wishlist" />}>
+                  <Heart aria-hidden />
+                  Wishlist
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logoutMutation.mutate()}>

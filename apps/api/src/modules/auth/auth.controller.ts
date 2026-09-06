@@ -19,6 +19,7 @@ import { parseDurationSeconds } from '../../common/utils/duration';
 import { AuthService, type SessionTokens } from './auth.service';
 import { CartService } from '../cart/cart.service';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { EmailOnlyDto } from './dto/email-only.dto';
@@ -106,6 +107,16 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async me(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.me(user.id);
+  }
+
+  @Post('profile')
+  @HttpCode(200)
+  @UseGuards(JwtAuthGuard)
+  async updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.authService.updateProfile(user.id, dto);
   }
 
   @Post('verify-email')

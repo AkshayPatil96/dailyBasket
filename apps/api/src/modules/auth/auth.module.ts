@@ -6,9 +6,10 @@ import { SessionService } from './session.service';
 import { TokenService } from './token.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CartModule } from '../cart/cart.module';
+import { OrdersModule } from '../orders/orders.module';
 
 @Module({
-  imports: [JwtModule.register({}), NotificationsModule, CartModule],
+  imports: [JwtModule.register({}), NotificationsModule, CartModule, OrdersModule],
   controllers: [AuthController],
   providers: [AuthService, SessionService, TokenService],
   exports: [AuthService],

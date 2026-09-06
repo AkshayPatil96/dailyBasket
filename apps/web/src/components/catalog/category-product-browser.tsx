@@ -75,7 +75,7 @@ export function CategoryProductBrowser({
         </p>
       ) : (
         <>
-          <div className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+          <div className="mt-6 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
             {items.map((product) => (
               <ProductCard key={product.id} product={product} />
             ))}

@@ -3,12 +3,14 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import type { User } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
+import { OrdersService } from '../orders/orders.service';
 import { SessionService } from './session.service';
 import { TokenService } from './token.service';
 import type { RegisterDto } from './dto/register.dto';
@@ -35,13 +37,27 @@ export interface SessionTokens {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessionService: SessionService,
     private readonly tokenService: TokenService,
     private readonly emailService: EmailService,
     private readonly configService: ConfigService,
+    private readonly ordersService: OrdersService,
   ) {}
+
+  // Best-effort — a guest order never creating a durable account link is a
+  // gap, not a correctness issue, so a failure here must never block
+  // register/login itself.
+  private async linkGuestOrders(userId: string, email: string): Promise<void> {
+    try {
+      await this.ordersService.linkGuestOrders(userId, email);
+    } catch (error) {
+      this.logger.warn(`Failed linking guest orders for ${userId}: ${error}`);
+    }
+  }
 
   async register(dto: RegisterDto) {
     const existing = await this.prisma.user.findUnique({
@@ -63,6 +79,12 @@ export class AuthService {
     });
 
     await this.issueEmailVerificationToken(user.id, user.email, user.firstName);
+    // Guest orders are NOT linked here — the email isn't proven to belong to
+    // this caller yet. Linking now would let anyone claim a stranger's guest
+    // order history (address, phone, order contents) just by registering
+    // with their email. Linked instead once ownership is proven: on
+    // verifyEmail() for a brand-new account, or on login() for an
+    // already-verified one (see linkGuestOrders callers).
 
     return toSafeUser(user);
   }
@@ -84,6 +106,16 @@ export class AuthService {
     const passwordValid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!passwordValid) {
       throw new UnauthorizedException('Invalid email or password');
+    }
+
+    // Gated on emailVerifiedAt, not just a successful password check —
+    // login isn't itself gated on verification in this app, so right after
+    // register() an attacker could otherwise log into an account created
+    // with a stranger's (unverified) email and immediately inherit their
+    // guest order history. A verified email is what actually proves this
+    // account owns that inbox.
+    if (user.emailVerifiedAt) {
+      await this.linkGuestOrders(user.id, user.email);
     }
 
     const { sessionId, jti } = await this.sessionService.createSession(
@@ -168,6 +200,18 @@ export class AuthService {
     return toSafeUser(user);
   }
 
+  async updateProfile(userId: string, dto: { firstName?: string; lastName?: string; phone?: string }) {
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phone: dto.phone,
+      },
+    });
+    return toSafeUser(user);
+  }
+
   async verifyEmail(rawToken: string): Promise<void> {
     const tokenHash = hashToken(rawToken);
     const record = await this.prisma.emailVerificationToken.findUnique({
@@ -180,7 +224,7 @@ export class AuthService {
       );
     }
 
-    await this.prisma.$transaction([
+    const [, user] = await this.prisma.$transaction([
       this.prisma.emailVerificationToken.update({
         where: { id: record.id },
         data: { usedAt: new Date() },
@@ -190,6 +234,11 @@ export class AuthService {
         data: { emailVerifiedAt: new Date() },
       }),
     ]);
+
+    // Email ownership is proven now — safe to link any guest orders placed
+    // under this address (see the register()/login() comments on why this
+    // can't happen any earlier).
+    await this.linkGuestOrders(user.id, user.email);
   }
 
   async resendVerification(email: string): Promise<void> {

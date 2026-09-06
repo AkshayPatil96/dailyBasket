@@ -4,27 +4,11 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Package } from 'lucide-react';
 import { formatCurrency } from '@grocery-delivery/utils';
-import type { OrderStatus } from '@grocery-delivery/types';
-import { AuthGuard } from '@/components/auth/auth-guard';
 import { ordersApi } from '@/lib/orders-api';
-
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  PENDING_PAYMENT: 'Pending payment',
-  PAYMENT_FAILED: 'Payment failed',
-  CONFIRMED: 'Confirmed',
-  PROCESSING: 'Processing',
-  PACKED: 'Packed',
-  OUT_FOR_DELIVERY: 'Out for delivery',
-  DELIVERED: 'Delivered',
-  CANCELLED: 'Cancelled',
-};
+import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
 
 export default function OrdersPage() {
-  return (
-    <AuthGuard>
-      <OrdersList />
-    </AuthGuard>
-  );
+  return <OrdersList />;
 }
 
 function OrdersList() {
@@ -34,7 +18,7 @@ function OrdersList() {
   });
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">Your orders</h1>
 
       {isLoading ? (
@@ -54,21 +38,27 @@ function OrdersList() {
               >
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-(--color-foreground)">
-                    Order #{order.id.slice(0, 8)}
+                    Order #{order.orderNumber}
                   </span>
                   <span className="text-sm font-semibold text-(--color-foreground)">
                     {formatCurrency(Number(order.total))}
                   </span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-(--color-muted-foreground)">
-                  <span>{new Date(order.createdAt).toLocaleDateString()}</span>
-                  <span>{STATUS_LABEL[order.status]}</span>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-(--color-muted-foreground)">
+                    {new Date(order.createdAt).toLocaleDateString()}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 font-medium ${ORDER_STATUS_BADGE_CLASS[order.status]}`}
+                  >
+                    {ORDER_STATUS_LABEL[order.status]}
+                  </span>
                 </div>
               </Link>
             </li>
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }

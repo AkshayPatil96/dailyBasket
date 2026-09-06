@@ -106,4 +106,15 @@ export const authApi = {
     apiClient
       .post<{ success: boolean; message: string }>('/auth/resend-verification', input)
       .then((res) => res.data),
+
+  updateProfile: (input: { firstName?: string; lastName?: string; phone?: string | null }) =>
+    apiClient.post<AuthUser>('/auth/profile', input).then((res) => res.data),
+
+  changePassword: (input: { currentPassword: string; newPassword: string }) =>
+    apiClient
+      .post<{ success: boolean }>('/auth/change-password', input)
+      .then((res) => res.data),
+
+  deleteAccount: () =>
+    apiClient.post<{ success: boolean }>('/auth/account/delete').then((res) => res.data),
 };

@@ -1,66 +1,98 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { Loader2, Package } from 'lucide-react';
+import { useState } from 'react';
+import Link from 'next/link';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Loader2, Package } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import type { OrderStatus } from '@grocery-delivery/types';
-import { AuthGuard } from '@/components/auth/auth-guard';
+import { Button } from '@/components/ui/button';
+import { OrderTimeline } from '@/components/orders/order-timeline';
+import { getApiErrorMessage } from '@/lib/api-client';
 import { ordersApi } from '@/lib/orders-api';
+import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  PENDING_PAYMENT: 'Pending payment',
-  PAYMENT_FAILED: 'Payment failed',
-  CONFIRMED: 'Confirmed',
-  PROCESSING: 'Processing',
-  PACKED: 'Packed',
-  OUT_FOR_DELIVERY: 'Out for delivery',
-  DELIVERED: 'Delivered',
-  CANCELLED: 'Cancelled',
-};
+// Customer can only self-cancel while the order hasn't left the building —
+// dailybasket-orders-order-tracking.md §12.
+const CANCELLABLE_STATUSES: OrderStatus[] = ['CONFIRMED', 'PROCESSING', 'PACKED'];
 
 export function OrderDetail({ orderId }: { orderId: string }) {
-  return (
-    <AuthGuard>
-      <OrderDetailContent orderId={orderId} />
-    </AuthGuard>
-  );
+  return <OrderDetailContent orderId={orderId} />;
 }
 
 function OrderDetailContent({ orderId }: { orderId: string }) {
+  const queryClient = useQueryClient();
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
   const { data: order, isLoading } = useQuery({
     queryKey: ['orders', orderId],
     queryFn: () => ordersApi.get(orderId),
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: () => ordersApi.cancel(orderId),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['orders', orderId], updated);
+      setShowCancelDialog(false);
+      toast.success('Order cancelled');
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, 'Could not cancel order.')),
+  });
+
   if (isLoading) {
     return (
-      <main className="flex min-h-[50vh] items-center justify-center">
+      <div className="flex min-h-[50vh] items-center justify-center">
         <Loader2 className="size-6 animate-spin text-(--color-primary)" aria-hidden />
-      </main>
+      </div>
     );
   }
 
   if (!order) {
     return (
-      <main className="mx-auto w-full max-w-2xl px-4 py-16 text-center sm:px-6">
+      <div className="mx-auto w-full max-w-2xl py-16 text-center">
         <p className="text-(--color-muted-foreground)">Order not found.</p>
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <Link
+        href="/orders"
+        className="flex items-center gap-1.5 text-sm text-(--color-muted-foreground) hover:text-(--color-foreground)"
+      >
+        <ArrowLeft className="size-4" aria-hidden />
+        Back to orders
+      </Link>
+
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">
-          Order #{order.id.slice(0, 8)}
+          Order #{order.orderNumber}
         </h1>
-        <span className="rounded-full bg-(--color-muted) px-3 py-1 text-xs font-medium text-(--color-muted-foreground)">
-          {STATUS_LABEL[order.status]}
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-medium ${ORDER_STATUS_BADGE_CLASS[order.status]}`}
+        >
+          {ORDER_STATUS_LABEL[order.status]}
         </span>
       </div>
       <p className="text-sm text-(--color-muted-foreground)">
         Placed on {new Date(order.createdAt).toLocaleString()}
       </p>
+
+      <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
+        <h2 className="text-sm font-semibold text-(--color-foreground)">Status</h2>
+        <OrderTimeline order={order} />
+      </div>
 
       <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
         <h2 className="text-sm font-semibold text-(--color-foreground)">Items</h2>
@@ -114,6 +146,32 @@ function OrderDetailContent({ orderId }: { orderId: string }) {
             .join(', ')}
         </p>
       </div>
-    </main>
+
+      {CANCELLABLE_STATUSES.includes(order.status) ? (
+        <Button variant="outline" onClick={() => setShowCancelDialog(true)}>
+          Cancel order
+        </Button>
+      ) : null}
+
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This cannot be undone. Reserved stock will be returned to inventory.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep order</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={cancelMutation.isPending}
+              onClick={() => cancelMutation.mutate()}
+            >
+              Cancel order
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

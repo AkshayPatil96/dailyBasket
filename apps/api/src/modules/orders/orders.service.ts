@@ -1,11 +1,74 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { Order, Prisma } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { DeliveryStatus, Order, OrderEventActor, OrderEventType, OrderStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AdminListOrdersDto } from './dto/admin-list-orders.dto';
 
 const ORDER_DETAIL_INCLUDE = {
   items: true,
   payment: true,
+  delivery: true,
+  events: { orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.OrderInclude;
+
+// Manual, admin-driven transitions only — CONFIRMED is reached automatically
+// at order creation (see finalizeOrderForPayment), never via this map.
+// Terminal states (DELIVERED, CANCELLED) and the two states an Order row
+// never actually occupies in this flow (PENDING_PAYMENT, PAYMENT_FAILED —
+// see the Order model comment) have no outgoing transitions.
+const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING_PAYMENT: [],
+  PAYMENT_FAILED: [],
+  CONFIRMED: ['PROCESSING', 'CANCELLED'],
+  PROCESSING: ['PACKED', 'CANCELLED'],
+  PACKED: ['OUT_FOR_DELIVERY', 'CANCELLED'],
+  OUT_FOR_DELIVERY: ['DELIVERED'],
+  DELIVERED: [],
+  CANCELLED: [],
+};
+
+// Each manual Order transition mirrors onto the separate Delivery/fulfillment
+// state machine and appends an audit event — dailybasket-orders-order-tracking.md
+// §4-5 (separate state machines) and §9-10 (append-only OrderEvent).
+const TARGET_STATUS_EFFECTS: Partial<
+  Record<OrderStatus, { deliveryStatus: DeliveryStatus; eventType: OrderEventType }>
+> = {
+  PROCESSING: { deliveryStatus: 'PICKING', eventType: 'PICKING_STARTED' },
+  PACKED: { deliveryStatus: 'PACKED', eventType: 'ORDER_PACKED' },
+  OUT_FOR_DELIVERY: { deliveryStatus: 'OUT_FOR_DELIVERY', eventType: 'OUT_FOR_DELIVERY' },
+  DELIVERED: { deliveryStatus: 'DELIVERED', eventType: 'DELIVERED' },
+  CANCELLED: { deliveryStatus: 'CANCELLED', eventType: 'ORDER_CANCELLED' },
+};
+
+interface DeliveryStatusFields {
+  status: DeliveryStatus;
+  pickingStartedAt?: Date;
+  packedAt?: Date;
+  outForDeliveryAt?: Date;
+  deliveredAt?: Date;
+}
+
+// Plain scalar values, not Prisma.DeliveryUpdateInput — this shape needs to
+// work as both a create() and an update() payload (see the upsert below).
+function deliveryUpdateFor(status: DeliveryStatus): DeliveryStatusFields {
+  const now = new Date();
+  switch (status) {
+    case 'PICKING':
+      return { status, pickingStartedAt: now };
+    case 'PACKED':
+      return { status, packedAt: now };
+    case 'OUT_FOR_DELIVERY':
+      return { status, outForDeliveryAt: now };
+    case 'DELIVERED':
+      return { status, deliveredAt: now };
+    default:
+      return { status };
+  }
+}
 
 @Injectable()
 export class OrdersService {
@@ -45,8 +108,11 @@ export class OrdersService {
     }
 
     return this.prisma.$transaction(async (tx) => {
+      const orderNumber = await this.nextOrderNumber(tx);
+
       const order = await tx.order.create({
         data: {
+          orderNumber,
           userId: session.userId,
           addressId: session.savedAddressId,
           recipientName: session.recipientName!,
@@ -97,6 +163,19 @@ export class OrdersService {
         });
       }
 
+      await tx.delivery.create({ data: { orderId: order.id, status: 'PENDING' } });
+      // Order rows in this flow are only ever created post-payment (see the
+      // Order model's status default), so all three happen together —
+      // matches the doc's timeline example without pretending they were
+      // spread over time.
+      await tx.orderEvent.createMany({
+        data: [
+          { orderId: order.id, type: 'ORDER_PLACED', actorType: 'SYSTEM' },
+          { orderId: order.id, type: 'PAYMENT_CONFIRMED', actorType: 'SYSTEM' },
+          { orderId: order.id, type: 'ORDER_CONFIRMED', actorType: 'SYSTEM' },
+        ],
+      });
+
       await tx.checkoutReservation.deleteMany({ where: { checkoutSessionId: session.id } });
       await tx.checkoutSession.update({
         where: { id: session.id },
@@ -108,6 +187,17 @@ export class OrdersService {
       await tx.cart.update({ where: { id: session.cartId }, data: { status: 'CONVERTED' } });
 
       return order;
+    });
+  }
+
+  // Guest checkouts never create a User row and are never retroactively
+  // matched — called from AuthService on both register and login so a guest
+  // order becomes visible in order history the moment its email gets an
+  // account, however that account came to exist.
+  async linkGuestOrders(userId: string, email: string): Promise<void> {
+    await this.prisma.order.updateMany({
+      where: { userId: null, guestEmail: { equals: email, mode: 'insensitive' } },
+      data: { userId },
     });
   }
 
@@ -135,5 +225,149 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
     return order;
+  }
+
+  // Public, unauthenticated lookup — the orderNumber+email pair is the proof
+  // of ownership (same trust model as any "track your package" flow), not a
+  // session. Read-only by construction: this returns an Order, never
+  // anything that lets the caller mutate it — every write endpoint on
+  // OrdersController still requires a real session regardless of what this
+  // reveals. A generic 404 either way (wrong orderNumber vs. wrong email)
+  // avoids confirming which part was wrong.
+  async trackOrder(orderNumber: string, email: string): Promise<Order> {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        orderNumber,
+        OR: [
+          { guestEmail: { equals: email, mode: 'insensitive' } },
+          { user: { email: { equals: email, mode: 'insensitive' } } },
+        ],
+      },
+      include: ORDER_DETAIL_INCLUDE,
+    });
+    if (!order) {
+      throw new NotFoundException('No order found for that order number and email');
+    }
+    return order;
+  }
+
+  // Customer self-service cancellation — only while the order hasn't left
+  // the building yet (dailybasket-orders-order-tracking.md §12: once
+  // OUT_FOR_DELIVERY, cancellation should route through support/admin).
+  async cancelForUser(userId: string, orderId: string, reason?: string): Promise<Order> {
+    const order = await this.prisma.order.findFirst({ where: { id: orderId, userId } });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    return this.applyTransition(order.id, 'CANCELLED', 'CUSTOMER', userId, reason ?? 'Cancelled by customer');
+  }
+
+  async adminList(dto: AdminListOrdersDto) {
+    const offset = dto.offset ?? 0;
+    const limit = dto.limit ?? 20;
+    const where: Prisma.OrderWhereInput = {
+      ...(dto.status ? { status: dto.status } : {}),
+      ...(dto.search
+        ? {
+            OR: [
+              { orderNumber: { contains: dto.search, mode: 'insensitive' } },
+              { recipientName: { contains: dto.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        include: ORDER_DETAIL_INCLUDE,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+    return { items, total, offset, limit, hasMore: offset + items.length < total };
+  }
+
+  async adminFindOne(orderId: string): Promise<Order> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: ORDER_DETAIL_INCLUDE,
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    return order;
+  }
+
+  async adminUpdateStatus(
+    adminUserId: string,
+    orderId: string,
+    targetStatus: OrderStatus,
+    reason?: string,
+  ): Promise<Order> {
+    return this.applyTransition(orderId, targetStatus, 'ADMIN', adminUserId, reason);
+  }
+
+  private async applyTransition(
+    orderId: string,
+    targetStatus: OrderStatus,
+    actorType: OrderEventActor,
+    actorId: string | undefined,
+    reason: string | undefined,
+  ): Promise<Order> {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const allowed = ALLOWED_TRANSITIONS[order.status];
+    if (!allowed.includes(targetStatus)) {
+      throw new ConflictException(`Cannot move order from ${order.status} to ${targetStatus}`);
+    }
+    if (targetStatus === 'CANCELLED' && !reason) {
+      throw new BadRequestException('reason is required to cancel an order');
+    }
+    const effect = TARGET_STATUS_EFFECTS[targetStatus];
+    if (!effect) {
+      throw new BadRequestException(`Unsupported status transition target: ${targetStatus}`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.order.update({ where: { id: orderId }, data: { status: targetStatus } });
+      // upsert, not update — orders created before this feature shipped have
+      // no Delivery row at all.
+      const deliveryData = deliveryUpdateFor(effect.deliveryStatus);
+      await tx.delivery.upsert({
+        where: { orderId },
+        create: { orderId, ...deliveryData },
+        update: deliveryData,
+      });
+      await tx.orderEvent.create({
+        data: { orderId, type: effect.eventType, message: reason, actorType, actorId },
+      });
+
+      if (targetStatus === 'CANCELLED') {
+        // Stock already left the reserved pool at order creation (converted
+        // to a real decrement) — cancelling before delivery returns it.
+        const items = await tx.orderItem.findMany({ where: { orderId } });
+        for (const item of items) {
+          await tx.inventory.update({
+            where: { variantId: item.variantId },
+            data: { quantity: { increment: item.quantity } },
+          });
+        }
+      }
+
+      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: ORDER_DETAIL_INCLUDE });
+    });
+  }
+
+  private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {
+    const [{ nextval }] = await tx.$queryRaw<
+      { nextval: bigint }[]
+    >`SELECT nextval('order_number_seq') AS nextval`;
+    const datePrefix = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    return `DB-${datePrefix}-${nextval.toString().padStart(6, '0')}`;
   }
 }

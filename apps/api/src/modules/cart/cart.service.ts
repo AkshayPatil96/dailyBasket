@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DELIVERY_FEE } from '../../config/pricing.constants';
@@ -96,27 +96,31 @@ export class CartService {
       },
     });
 
-    const available = variant.inventory
-      ? variant.inventory.quantity - variant.inventory.reservedQuantity
-      : 0;
-    const desiredQuantity = (existing?.quantity ?? 0) + dto.quantity;
-    const clampedQuantity = Math.min(desiredQuantity, Math.max(available, 0));
-
-    if (clampedQuantity <= 0) {
+    const available = Math.max(
+      variant.inventory ? variant.inventory.quantity - variant.inventory.reservedQuantity : 0,
+      0,
+    );
+    if (available <= 0) {
       throw new NotFoundException('This item is out of stock');
+    }
+    const desiredQuantity = (existing?.quantity ?? 0) + dto.quantity;
+    if (desiredQuantity > available) {
+      // Reject rather than silently clamp — clamping to the same value the
+      // cart was already at looks like the button did nothing.
+      throw new BadRequestException(`Only ${available} available`);
     }
 
     if (existing) {
       await this.prisma.cartItem.update({
         where: { id: existing.id },
-        data: { quantity: clampedQuantity },
+        data: { quantity: desiredQuantity },
       });
     } else {
       await this.prisma.cartItem.create({
         data: {
           cartId: cart.id,
           variantId: dto.variantId,
-          quantity: clampedQuantity,
+          quantity: desiredQuantity,
         },
       });
     }
@@ -141,18 +145,24 @@ export class CartService {
       throw new NotFoundException('Cart item not found');
     }
 
-    const available = item.variant.inventory
-      ? item.variant.inventory.quantity -
-        item.variant.inventory.reservedQuantity
-      : 0;
-    const clampedQuantity = Math.min(dto.quantity, Math.max(available, 0));
-    if (clampedQuantity <= 0) {
+    const available = Math.max(
+      item.variant.inventory
+        ? item.variant.inventory.quantity - item.variant.inventory.reservedQuantity
+        : 0,
+      0,
+    );
+    if (available <= 0) {
       throw new NotFoundException('This item is out of stock');
+    }
+    if (dto.quantity > available) {
+      // Reject rather than silently clamp — clamping to the same value the
+      // cart was already at looks like the +/- button did nothing.
+      throw new BadRequestException(`Only ${available} available`);
     }
 
     await this.prisma.cartItem.update({
       where: { id: itemId },
-      data: { quantity: clampedQuantity },
+      data: { quantity: dto.quantity },
     });
     return this.buildSummary(cart.id);
   }

@@ -6,7 +6,6 @@ import { MapPin, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import type { Address } from '@grocery-delivery/types';
 import { addressesApi, type AddressInput } from '@/lib/addresses-api';
 import { getApiErrorMessage } from '@/lib/api-client';
-import { AuthGuard } from '@/components/auth/auth-guard';
 import { AddressForm } from '@/components/address/address-form';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,11 +19,7 @@ import { toast } from 'sonner';
 const ADDRESSES_QUERY_KEY = ['addresses'];
 
 export default function AddressesPage() {
-  return (
-    <AuthGuard>
-      <AddressesManager />
-    </AuthGuard>
-  );
+  return <AddressesManager />;
 }
 
 function AddressesManager() {
@@ -82,7 +77,7 @@ function AddressesManager() {
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">
           Delivery addresses
@@ -188,6 +183,6 @@ function AddressesManager() {
           />
         </DialogContent>
       </Dialog>
-    </main>
+    </div>
   );
 }

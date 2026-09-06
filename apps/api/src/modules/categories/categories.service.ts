@@ -156,6 +156,8 @@ export class CategoriesService {
         await tx.productImage.deleteMany({
           where: { productId: { in: productIds } },
         });
+        await tx.favorite.deleteMany({ where: { productId: { in: productIds } } });
+        await tx.productView.deleteMany({ where: { productId: { in: productIds } } });
         await tx.product.deleteMany({ where: { id: { in: productIds } } });
         // Leaves before roots — descendantIds() is parent-first, so reverse it.
         for (const categoryId of [...categoryIds].reverse()) {

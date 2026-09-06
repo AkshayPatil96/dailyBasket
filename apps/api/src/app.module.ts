@@ -22,6 +22,8 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { SettingsModule } from './modules/settings/settings.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
+import { ProductViewsModule } from './modules/product-views/product-views.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
@@ -60,6 +62,8 @@ import { validateEnv } from './config/env.validation';
     DeliveryModule,
     CouponsModule,
     SettingsModule,
+    FavoritesModule,
+    ProductViewsModule,
     NotificationsModule,
     AdminModule,
     UploadsModule,

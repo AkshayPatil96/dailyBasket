@@ -18,7 +18,21 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CouponsService } from '../coupons/coupons.service';
+import { PRODUCT_CARD_INCLUDE } from '../products/products.service';
 import { AdminListOrdersDto } from './dto/admin-list-orders.dto';
+
+export interface BuyAgainItem {
+  product: Prisma.ProductGetPayload<{ include: typeof PRODUCT_CARD_INCLUDE }>;
+  lastOrderedAt: Date;
+  lastQuantity: number;
+}
+
+// How many past order items to scan for distinct products, and how many
+// distinct products to return — a scan window well beyond the return cap so
+// a customer with lots of repeat orders of the same few things still surfaces
+// a full list instead of stalling on early duplicates.
+const BUY_AGAIN_SCAN_WINDOW = 200;
+const BUY_AGAIN_LIMIT = 20;
 
 const ORDER_DETAIL_INCLUDE = {
   items: true,
@@ -304,6 +318,47 @@ export class OrdersService {
       this.prisma.order.count({ where }),
     ]);
     return { items, total, offset, limit, hasMore: offset + items.length < total };
+  }
+
+  // Distinct products from the customer's own non-cancelled orders, most
+  // recently ordered first. A product can never be hard-deleted while it
+  // still has order history (see ProductsService.remove()'s FK-violation
+  // catch), so every productId found here is guaranteed to still resolve.
+  async buyAgain(userId: string): Promise<BuyAgainItem[]> {
+    const items = await this.prisma.orderItem.findMany({
+      where: { order: { userId, status: { not: 'CANCELLED' } } },
+      orderBy: { order: { createdAt: 'desc' } },
+      take: BUY_AGAIN_SCAN_WINDOW,
+      select: {
+        productId: true,
+        quantity: true,
+        order: { select: { createdAt: true } },
+      },
+    });
+
+    const latestByProduct = new Map<string, { lastOrderedAt: Date; lastQuantity: number }>();
+    for (const item of items) {
+      if (latestByProduct.size >= BUY_AGAIN_LIMIT) break;
+      if (!latestByProduct.has(item.productId)) {
+        latestByProduct.set(item.productId, {
+          lastOrderedAt: item.order.createdAt,
+          lastQuantity: item.quantity,
+        });
+      }
+    }
+
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: [...latestByProduct.keys()] } },
+      include: PRODUCT_CARD_INCLUDE,
+    });
+    const productById = new Map(products.map((product) => [product.id, product]));
+
+    return [...latestByProduct.entries()]
+      .map(([productId, meta]) => {
+        const product = productById.get(productId);
+        return product ? { product, ...meta } : null;
+      })
+      .filter((entry): entry is BuyAgainItem => entry !== null);
   }
 
   async findOneForUser(userId: string, orderId: string): Promise<Order> {

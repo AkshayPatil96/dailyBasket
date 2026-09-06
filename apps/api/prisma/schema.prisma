@@ -153,6 +153,8 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   notifications           Notification[]
   couponRedemptions       CouponRedemption[]
+  favorites               Favorite[]
+  productViews            ProductView[]
 
   @@map("users")
 }
@@ -290,6 +292,8 @@ model Product {
   images     ProductImage[]
   variants   ProductVariant[]
   orderItems OrderItem[]
+  favorites  Favorite[]
+  views      ProductView[]
 
   @@index([categoryId])
   @@index([status, isFeatured])
@@ -708,4 +712,40 @@ model Delivery {
   order Order @relation(fields: [orderId], references: [id])
 
   @@map("deliveries")
+}
+
+// Explicit save-to-favorites — product-level, not variant-level, so a
+// favorited product can be re-added with whatever variant the customer
+// wants at the time (grocery variants change price/stock far more often
+// than the product identity itself). Auth-only, no guest favorites.
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  productId String   @map("product_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@map("favorites")
+}
+
+// One row per (user, product) — a view upserts and bumps viewedAt rather
+// than appending a new row each time, so "recently viewed" is just
+// `ORDER BY viewed_at DESC LIMIT N` with no separate pruning job needed.
+// Auth-only — a guest's browsing history isn't worth persisting.
+model ProductView {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  productId String   @map("product_id")
+  viewedAt  DateTime @default(now()) @map("viewed_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([userId, productId])
+  @@index([userId, viewedAt])
+  @@map("product_views")
 }

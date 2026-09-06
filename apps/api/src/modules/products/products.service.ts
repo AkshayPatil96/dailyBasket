@@ -30,7 +30,7 @@ const DEFAULT_LIMIT = 20;
 
 // `brand` is a plain scalar column, not a relation — it's always included
 // alongside the other product fields, no include entry needed for it.
-const PRODUCT_CARD_INCLUDE = {
+export const PRODUCT_CARD_INCLUDE = {
   category: { select: { id: true, name: true, slug: true } },
   images: { where: { isPrimary: true }, take: 1 },
   variants: {
@@ -491,6 +491,8 @@ export class ProductsService {
         await tx.inventory.deleteMany({ where: { variant: { productId: id } } });
         await tx.productVariant.deleteMany({ where: { productId: id } });
         await tx.productImage.deleteMany({ where: { productId: id } });
+        await tx.favorite.deleteMany({ where: { productId: id } });
+        await tx.productView.deleteMany({ where: { productId: id } });
         await tx.product.delete({ where: { id } });
       });
     } catch {

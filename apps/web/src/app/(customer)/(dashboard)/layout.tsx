@@ -10,7 +10,7 @@ const NAV_ITEMS = [
   { href: '/account', label: 'Profile', icon: User },
   { href: '/orders', label: 'Orders', icon: Package },
   { href: '/account/addresses', label: 'Addresses', icon: MapPin },
-  { href: '/account/wishlist', label: 'Wishlist', icon: Heart },
+  { href: '/account/favorites', label: 'Favorites', icon: Heart },
 ];
 
 // Mobile-first: a horizontal scrollable tab strip below the header on small

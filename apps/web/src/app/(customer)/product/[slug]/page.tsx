@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import axios from 'axios';
 import { catalogApi } from '@/lib/catalog-api';
+import { FavoriteButton } from '@/components/catalog/favorite-button';
 import { ProductImageGallery } from '@/components/catalog/product-image-gallery';
 import { ProductVariantPicker } from '@/components/catalog/product-variant-picker';
+import { RecordProductView } from '@/components/catalog/record-product-view';
 import { ProductRail } from '@/components/home/product-rail';
 
 export default async function ProductPage({
@@ -70,14 +72,18 @@ export default async function ProductPage({
           <ProductImageGallery images={product.images} productName={product.name} />
 
           <div className="flex flex-col gap-4">
+            <RecordProductView productId={product.id} />
             {product.brand ? (
               <span className="text-sm font-medium text-(--color-muted-foreground)">
                 {product.brand}
               </span>
             ) : null}
-            <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">
-              {product.name}
-            </h1>
+            <div className="flex items-start justify-between gap-3">
+              <h1 className="font-display text-2xl font-semibold text-(--color-foreground)">
+                {product.name}
+              </h1>
+              <FavoriteButton productId={product.id} className="shrink-0" />
+            </div>
 
             {product.dietaryInfo.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">

@@ -328,6 +328,13 @@ export interface Order {
   events?: OrderEvent[];
 }
 
+/** GET /orders/buy-again — distinct products from past orders, most recently ordered first. */
+export interface BuyAgainItem {
+  product: ProductSummary;
+  lastOrderedAt: string;
+  lastQuantity: number;
+}
+
 export interface Payment {
   id: string;
   orderId?: string | null;

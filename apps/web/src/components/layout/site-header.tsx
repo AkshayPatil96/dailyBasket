@@ -141,9 +141,9 @@ export function SiteHeader() {
                   <MapPin aria-hidden />
                   Addresses
                 </DropdownMenuItem>
-                <DropdownMenuItem render={<Link href="/account/wishlist" />}>
+                <DropdownMenuItem render={<Link href="/account/favorites" />}>
                   <Heart aria-hidden />
-                  Wishlist
+                  Favorites
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => logoutMutation.mutate()}>

@@ -36,6 +36,11 @@ export class OrdersController {
     return this.ordersService.listForUser(user.id, dto.offset ?? 0, dto.limit ?? DEFAULT_LIMIT);
   }
 
+  @Get('buy-again')
+  async buyAgain(@CurrentUser() user: AuthenticatedUser) {
+    return this.ordersService.buyAgain(user.id);
+  }
+
   @Get()
   async findOne(
     @CurrentUser() user: AuthenticatedUser,

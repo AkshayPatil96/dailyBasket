@@ -1,7 +1,8 @@
 export const ROLES = {
   CUSTOMER: 'CUSTOMER',
   DELIVERY_PARTNER: 'DELIVERY_PARTNER',
-  ADMIN: 'ADMIN'
+  ADMIN: 'ADMIN',
+  SUPER_ADMIN: 'SUPER_ADMIN'
 } as const;
 
 export const ORDER_STATUS = {

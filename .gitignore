@@ -32,8 +32,6 @@ coverage/
 playwright-report/
 test-results/
 
-# prisma
-apps/api/generated/
 
 # misc
 *.tsbuildinfo

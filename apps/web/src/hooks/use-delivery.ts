@@ -23,8 +23,8 @@ export function useDeliveryHistory(enabled: boolean) {
 // Every partner action invalidates both the active delivery and (since
 // accept/reject/complete all change what counts as "past") history, plus the
 // partner's own profile — accepting flips availabilityStatus indirectly via
-// admin's assign step already, but reject frees them back to AVAILABLE.
-function useDeliveryAction(mutationFn: (deliveryId: string) => Promise<unknown>) {
+// admin's assign step already, but reject/complete free them back to AVAILABLE.
+function useDeliveryAction<TVariables>(mutationFn: (variables: TVariables) => Promise<unknown>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
@@ -49,4 +49,10 @@ export function usePickupDelivery() {
 
 export function useStartDelivery() {
   return useDeliveryAction(deliveryApi.start);
+}
+
+export function useCompleteDelivery() {
+  return useDeliveryAction(({ deliveryId, otpCode }: { deliveryId: string; otpCode: string }) =>
+    deliveryApi.complete(deliveryId, otpCode),
+  );
 }

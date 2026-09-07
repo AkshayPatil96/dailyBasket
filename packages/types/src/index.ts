@@ -296,6 +296,8 @@ export interface Delivery {
   currentLongitude?: number | null;
   lastLocationAt?: string | null;
   deliveryNotes?: string | null;
+  /** Never present on the delivery partner's own endpoints — see DeliveryService.myActive(). */
+  otpCode?: string | null;
   otpExpiresAt?: string | null;
   failureReason?: DeliveryFailureReason | null;
   assignedAt?: string | null;
@@ -376,15 +378,23 @@ export interface PartnerDeliveryOrder extends Omit<Order, 'payment'> {
   payment: { status: PaymentStatus } | null;
 }
 
-export interface PartnerActiveDelivery extends Delivery {
+export interface PartnerActiveDelivery extends Omit<Delivery, 'otpCode'> {
   order: PartnerDeliveryOrder;
   /** Only set while status is ASSIGNED — when the accept window runs out. */
   acceptDeadlineAt?: string | null;
 }
 
-/** GET /delivery/my/history — a past delivery plus how it ended for this partner. */
-export interface PartnerHistoryDelivery extends DeliveryListItem {
+/**
+ * GET /delivery/my/history — a past delivery plus how it ended for this
+ * partner. delivery.id/status/timestamps reflect the Delivery's *current*
+ * state, which is shared across every assignment attempt on it — use the
+ * assignment* fields (unique per row) for the key, outcome, and "when".
+ */
+export interface PartnerHistoryDelivery extends Omit<DeliveryListItem, 'otpCode'> {
+  assignmentId: string;
   assignmentOutcome: DeliveryAssignmentOutcome;
+  assignmentAssignedAt: string;
+  assignmentRespondedAt?: string | null;
 }
 
 export interface OrderEvent {

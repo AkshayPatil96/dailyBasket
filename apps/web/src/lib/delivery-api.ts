@@ -21,4 +21,7 @@ export const deliveryApi = {
 
   start: (deliveryId: string) =>
     apiClient.post<Delivery>(`/delivery/my/start?id=${deliveryId}`).then((res) => res.data),
+
+  complete: (deliveryId: string, otpCode: string) =>
+    apiClient.post<Delivery>(`/delivery/my/complete?id=${deliveryId}`, { otpCode }).then((res) => res.data),
 };

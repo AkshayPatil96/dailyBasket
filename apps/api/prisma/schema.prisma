@@ -748,9 +748,13 @@ model Delivery {
   lastLocationAt   DateTime? @map("last_location_at") @db.Timestamptz
   deliveryNotes    String?   @map("delivery_notes")
 
-  // Hashed like EmailVerificationToken/PasswordResetToken — short-lived and
-  // low-value, but no reason to store it plaintext.
-  otpHash      String?   @map("otp_hash")
+  // Plaintext, unlike EmailVerificationToken/PasswordResetToken — this isn't
+  // an auth credential, it's a handoff code the customer has to read out to
+  // the partner, so it must be recoverable to display on the order/tracking
+  // page, not just verifiable. Low blast radius if leaked (confirms receipt
+  // of one order, no account access) — never returned to the delivery
+  // partner's own endpoints though, see DeliveryService.myActive().
+  otpCode      String?   @map("otp_code")
   otpExpiresAt DateTime? @map("otp_expires_at") @db.Timestamptz
 
   failureReason DeliveryFailureReason? @map("failure_reason")

@@ -102,32 +102,35 @@ export class OrdersService {
     private readonly couponsService: CouponsService,
   ) {}
 
+  // Authenticated orders use the account email; guest orders use the
+  // checkout-captured guestEmail. Shared by notifyOrderUpdate and
+  // notifyDeliveryOtp so both agree on where an order's owner is reachable.
+  private async resolveContact(order: Order): Promise<{ email: string | null | undefined; name: string }> {
+    if (order.userId) {
+      const user = await this.prisma.user.findUnique({
+        where: { id: order.userId },
+        select: { email: true, firstName: true },
+      });
+      return user ? { email: user.email, name: user.firstName } : { email: undefined, name: order.recipientName };
+    }
+    return { email: order.guestEmail, name: order.recipientName };
+  }
+
   // Best-effort — a failed email/notification must never break order
   // creation or a status transition that already committed successfully.
   private async notifyOrderUpdate(order: Order, type: NotificationType, statusLabel: string): Promise<void> {
     try {
-      let email: string | null | undefined;
-      let name = order.recipientName;
+      const { email, name } = await this.resolveContact(order);
 
-      if (order.userId) {
-        const user = await this.prisma.user.findUnique({
-          where: { id: order.userId },
-          select: { email: true, firstName: true },
-        });
-        if (user) {
-          email = user.email;
-          name = user.firstName;
-          const title = type === 'ORDER_CONFIRMED' ? 'Order confirmed' : `Order ${statusLabel.toLowerCase()}`;
-          await this.notificationsService.createForUser(
-            order.userId,
-            type,
-            title,
-            `Your order ${order.orderNumber} is now ${statusLabel.toLowerCase()}.`,
-            order.id,
-          );
-        }
-      } else {
-        email = order.guestEmail;
+      if (order.userId && email) {
+        const title = type === 'ORDER_CONFIRMED' ? 'Order confirmed' : `Order ${statusLabel.toLowerCase()}`;
+        await this.notificationsService.createForUser(
+          order.userId,
+          type,
+          title,
+          `Your order ${order.orderNumber} is now ${statusLabel.toLowerCase()}.`,
+          order.id,
+        );
       }
 
       if (!email) {
@@ -140,6 +143,22 @@ export class OrdersService {
       }
     } catch (error) {
       this.logger.warn(`Failed sending notification for order ${order.id}: ${error}`);
+    }
+  }
+
+  // Best-effort delivery-handoff code email — the order/tracking page is the
+  // primary channel (shows the code live once OUT_FOR_DELIVERY), this is
+  // just a backup in case the customer isn't looking at it right then.
+  async notifyDeliveryOtp(orderId: string, otp: string): Promise<void> {
+    try {
+      const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+      const { email, name } = await this.resolveContact(order);
+      if (!email) {
+        return;
+      }
+      await this.emailService.sendDeliveryOtpEmail(email, name, order.orderNumber, otp);
+    } catch (error) {
+      this.logger.warn(`Failed sending delivery OTP email for order ${orderId}: ${error}`);
     }
   }
 

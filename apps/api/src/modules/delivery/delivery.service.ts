@@ -1,3 +1,4 @@
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { Delivery, DeliveryStatus } from '@prisma/client';
@@ -22,6 +23,11 @@ const ACCEPT_WINDOW_MS = 5 * 60 * 1000;
 // Caps how much one cron tick touches, same reasoning as AdminService's
 // checkout-reservation sweep — a slow run just catches the rest next minute.
 const MAX_EXPIRY_SWEEP_PER_RUN = 200;
+
+// Generous on purpose — a delivery can sit OUT_FOR_DELIVERY for a while
+// before the partner actually reaches the door, and re-issuing an OTP mid-
+// route is more friction than a long expiry is worth at this scale.
+const OTP_TTL_MS = 60 * 60 * 1000;
 
 const DELIVERY_LIST_ORDER_INCLUDE = {
   order: {
@@ -214,19 +220,37 @@ export class DeliveryService {
     });
   }
 
+  // crypto.randomInt, not Math.random() — this gets read aloud to authorize
+  // a real-world handoff, not just displayed for show.
+  private generateOtp(): string {
+    return randomInt(0, 1_000_000).toString().padStart(6, '0');
+  }
+
+  // Constant-time compare — a 6-digit code is guessable regardless, but
+  // there's no reason to leak a timing signal on top of that. The length
+  // check must come first: timingSafeEqual throws on mismatched buffer sizes.
+  private otpMatches(expected: string, provided: string): boolean {
+    const expectedBuf = Buffer.from(expected);
+    const providedBuf = Buffer.from(provided);
+    return expectedBuf.length === providedBuf.length && timingSafeEqual(expectedBuf, providedBuf);
+  }
+
   // The partner's current, non-terminal delivery — at most one at a time
   // (see AGENTS.md/doc: no multi-delivery batching in v1).
   async myActive(deliveryPartnerId: string) {
-    const delivery = await this.prisma.delivery.findFirst({
+    const found = await this.prisma.delivery.findFirst({
       where: {
         deliveryPartnerId,
         status: { in: ['ASSIGNED', 'ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY'] },
       },
       include: PARTNER_FULFILLMENT_INCLUDE,
     });
-    if (!delivery) {
+    if (!found) {
       return null;
     }
+    // The partner must never see the OTP on their own screen — it's read
+    // out to them by the customer at handoff, not looked up.
+    const { otpCode: _otpCode, ...delivery } = found;
     // Derived, not stored — ACCEPT_WINDOW_MS is the single source of truth
     // for the window's length, this just tells the client when it ends so
     // the dashboard can render a countdown without hardcoding the duration
@@ -260,7 +284,21 @@ export class DeliveryService {
       take: 50,
       include: { delivery: { include: DELIVERY_LIST_ORDER_INCLUDE } },
     });
-    return assignments.map((assignment) => ({ ...assignment.delivery, assignmentOutcome: assignment.outcome }));
+    // The same Delivery row can appear once per assignment attempt (a
+    // reassigned-then-retried delivery has multiple DeliveryAssignment rows
+    // pointing at one Delivery), so its own status/timestamps are the same
+    // on every row here — the assignment's *own* outcome/assignedAt/
+    // respondedAt are what actually varies per history entry.
+    return assignments.map((assignment) => {
+      const { otpCode: _otpCode, ...delivery } = assignment.delivery;
+      return {
+        ...delivery,
+        assignmentId: assignment.id,
+        assignmentOutcome: assignment.outcome,
+        assignmentAssignedAt: assignment.assignedAt,
+        assignmentRespondedAt: assignment.respondedAt,
+      };
+    });
   }
 
   private async assertOwnedDelivery(
@@ -321,13 +359,21 @@ export class DeliveryService {
 
   // The only partner action that also moves the Order forward — see
   // OrdersService.syncOrderStatusFromDelivery's comment on why OUT_FOR_DELIVERY
-  // is a side effect of this, not a direct admin/customer action.
+  // is a side effect of this, not a direct admin/customer action. Also mints
+  // the handoff OTP here — this is the first moment the customer needs it.
   async myStart(deliveryPartnerId: string, deliveryId: string): Promise<Delivery> {
+    const otp = this.generateOtp();
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const delivery = await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'PICKED_UP');
       const result = await tx.delivery.update({
         where: { id: deliveryId },
-        data: { status: 'OUT_FOR_DELIVERY', outForDeliveryAt: new Date() },
+        data: {
+          status: 'OUT_FOR_DELIVERY',
+          outForDeliveryAt: new Date(),
+          otpCode: otp,
+          otpExpiresAt: new Date(Date.now() + OTP_TTL_MS),
+        },
       });
       await this.ordersService.syncOrderStatusFromDelivery(tx, delivery.orderId, 'OUT_FOR_DELIVERY');
       return result;
@@ -335,6 +381,37 @@ export class DeliveryService {
 
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: updated.orderId } });
     await this.ordersService.notifyDeliveryStatusChange(order, 'OUT_FOR_DELIVERY');
+    await this.ordersService.notifyDeliveryOtp(updated.orderId, otp);
+    return updated;
+  }
+
+  // Verifies the code the customer read out to the partner, then completes
+  // the delivery — the only partner action besides "start" that also moves
+  // the Order forward (doc: "Backend verifies" -> DELIVERED).
+  async myComplete(deliveryPartnerId: string, deliveryId: string, otpCode: string): Promise<Delivery> {
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const delivery = await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'OUT_FOR_DELIVERY');
+      if (!delivery.otpCode || !delivery.otpExpiresAt || delivery.otpExpiresAt < new Date()) {
+        throw new ConflictException('This delivery code has expired — ask the customer for a fresh one');
+      }
+      if (!this.otpMatches(delivery.otpCode, otpCode.trim())) {
+        throw new ConflictException('Incorrect delivery code');
+      }
+
+      const result = await tx.delivery.update({
+        where: { id: deliveryId },
+        data: { status: 'DELIVERED', deliveredAt: new Date(), otpCode: null, otpExpiresAt: null },
+      });
+      await tx.deliveryPartner.update({
+        where: { id: deliveryPartnerId },
+        data: { availabilityStatus: 'AVAILABLE', availableSince: new Date() },
+      });
+      await this.ordersService.syncOrderStatusFromDelivery(tx, delivery.orderId, 'DELIVERED');
+      return result;
+    });
+
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: updated.orderId } });
+    await this.ordersService.notifyDeliveryStatusChange(order, 'DELIVERED');
     return updated;
   }
 }

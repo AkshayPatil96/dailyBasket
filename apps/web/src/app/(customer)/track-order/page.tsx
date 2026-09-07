@@ -8,6 +8,7 @@ import { formatCurrency } from '@grocery-delivery/utils';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { OrderTimeline } from '@/components/orders/order-timeline';
+import { DeliveryOtpCard } from '@/components/orders/delivery-otp-card';
 import { getApiErrorMessage } from '@/lib/api-client';
 import { ordersApi } from '@/lib/orders-api';
 import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
@@ -118,6 +119,8 @@ function TrackOrderView() {
             <h3 className="text-sm font-semibold text-(--color-foreground)">Status</h3>
             <OrderTimeline order={order} />
           </div>
+
+          <DeliveryOtpCard delivery={order.delivery} />
 
           <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
             <h3 className="text-sm font-semibold text-(--color-foreground)">Items</h3>

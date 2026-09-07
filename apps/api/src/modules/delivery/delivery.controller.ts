@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { DeliveryStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -8,6 +9,7 @@ import type { AuthenticatedUser } from '../../common/types/authenticated-request
 import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
 import { DeliveryService } from './delivery.service';
 import { AssignDeliveryDto } from './dto/assign-delivery.dto';
+import { CompleteDeliveryDto } from './dto/complete-delivery.dto';
 
 const VALID_DELIVERY_STATUSES: DeliveryStatus[] = [
   'PENDING_ASSIGNMENT',
@@ -125,5 +127,23 @@ export class DeliveryController {
     }
     const partner = await this.deliveryPartnersService.getByUserId(user.id);
     return this.deliveryService.myStart(partner.id, deliveryId);
+  }
+
+  // Tighter than the app-wide default (100/min) — a 6-digit code is a small
+  // enough space that the default limit isn't a real brute-force guard.
+  @Post('my/complete')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async myComplete(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('id') deliveryId: string | undefined,
+    @Body() dto: CompleteDeliveryDto,
+  ) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myComplete(partner.id, deliveryId, dto.otpCode);
   }
 }

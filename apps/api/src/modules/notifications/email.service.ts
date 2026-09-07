@@ -122,6 +122,26 @@ export class EmailService {
     });
   }
 
+  async sendDeliveryOtpEmail(
+    to: string,
+    name: string,
+    orderNumber: string,
+    otp: string,
+  ): Promise<void> {
+    const safeName = escapeHtml(name);
+
+    await this.send({
+      to,
+      subject: `Your delivery code for ${orderNumber}`,
+      html: `
+        <p>Hi ${safeName},</p>
+        <p>Your order <strong>${orderNumber}</strong> is out for delivery. Share this code with the delivery partner to confirm handoff:</p>
+        <p style="font-size: 24px; font-weight: 700; letter-spacing: 4px;">${otp}</p>
+        <p>Don't share this code with anyone before your delivery arrives.</p>
+      `,
+    });
+  }
+
   async sendPasswordResetEmail(
     to: string,
     firstName: string,

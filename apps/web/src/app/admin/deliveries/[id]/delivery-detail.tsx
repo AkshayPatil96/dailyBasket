@@ -5,20 +5,16 @@ import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { formatCurrency, formatDate } from '@grocery-delivery/utils';
-import type { DeliveryAssignmentOutcome } from '@grocery-delivery/types';
 import { adminDeliveriesApi } from '@/lib/admin-deliveries-api';
-import { DELIVERY_STATUS_BADGE_CLASS, DELIVERY_STATUS_LABEL, RETRYABLE_DELIVERY_STATUSES } from '@/lib/delivery-status';
+import {
+  ASSIGNMENT_OUTCOME_LABEL,
+  DELIVERY_STATUS_BADGE_CLASS,
+  DELIVERY_STATUS_LABEL,
+  RETRYABLE_DELIVERY_STATUSES,
+} from '@/lib/delivery-status';
 import { AssignPartnerPicker } from '@/components/admin/assign-partner-picker';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-
-const ASSIGNMENT_OUTCOME_LABEL: Record<DeliveryAssignmentOutcome, string> = {
-  PENDING: 'Awaiting response',
-  ACCEPTED: 'Accepted',
-  REJECTED: 'Rejected',
-  REASSIGNED: 'Reassigned',
-  EXPIRED: 'Missed the accept window',
-};
 
 const TIMELINE_STEPS: { key: 'assignedAt' | 'acceptedAt' | 'pickedUpAt' | 'outForDeliveryAt' | 'deliveredAt'; label: string }[] = [
   { key: 'assignedAt', label: 'Assigned' },

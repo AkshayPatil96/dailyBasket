@@ -1,4 +1,4 @@
-import type { DeliveryStatus } from '@grocery-delivery/types';
+import type { DeliveryAssignmentOutcome, DeliveryStatus } from '@grocery-delivery/types';
 
 export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   PENDING_ASSIGNMENT: 'Waiting for assignment',
@@ -27,3 +27,21 @@ export const DELIVERY_STATUS_BADGE_CLASS: Record<DeliveryStatus, string> = {
 
 // States where a "Retry" (reassign) action makes sense.
 export const RETRYABLE_DELIVERY_STATUSES: DeliveryStatus[] = ['REJECTED', 'FAILED'];
+
+// A DeliveryAssignment's own outcome — distinct from the Delivery's current
+// status, which multiple assignment attempts on the same delivery all share.
+export const ASSIGNMENT_OUTCOME_LABEL: Record<DeliveryAssignmentOutcome, string> = {
+  PENDING: 'Awaiting response',
+  ACCEPTED: 'Accepted',
+  REJECTED: 'Rejected',
+  REASSIGNED: 'Reassigned',
+  EXPIRED: 'Missed the accept window',
+};
+
+export const ASSIGNMENT_OUTCOME_BADGE_CLASS: Record<DeliveryAssignmentOutcome, string> = {
+  PENDING: 'bg-amber-500/15 text-amber-700 dark:text-amber-400',
+  ACCEPTED: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400',
+  REJECTED: 'bg-red-500/15 text-red-700 dark:text-red-400',
+  REASSIGNED: 'bg-(--color-muted) text-(--color-muted-foreground)',
+  EXPIRED: 'bg-red-500/15 text-red-700 dark:text-red-400',
+};

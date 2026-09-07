@@ -3,11 +3,12 @@
 import { useEffect, useState } from 'react';
 import { Clock, Loader2, MapPin, Package, Phone, Power } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatCurrency, formatDate } from '@grocery-delivery/utils';
+import { formatCurrency } from '@grocery-delivery/utils';
 import { useMyDeliveryPartnerProfile, useSetAvailability } from '@/hooks/use-delivery-partner';
 import {
   useAcceptDelivery,
   useActiveDelivery,
+  useCompleteDelivery,
   useDeliveryHistory,
   usePickupDelivery,
   useRejectDelivery,
@@ -16,6 +17,7 @@ import {
 import { getApiErrorMessage } from '@/lib/api-client';
 import { DELIVERY_STATUS_BADGE_CLASS, DELIVERY_STATUS_LABEL } from '@/lib/delivery-status';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/ui/form-field';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,11 +75,13 @@ export default function DeliveryHomePage() {
   const { data: active, isLoading: isLoadingActive } = useActiveDelivery();
   const { data: history } = useDeliveryHistory(true);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [otpInput, setOtpInput] = useState('');
 
   const acceptMutation = useAcceptDelivery();
   const rejectMutation = useRejectDelivery();
   const pickupMutation = usePickupDelivery();
   const startMutation = useStartDelivery();
+  const completeMutation = useCompleteDelivery();
 
   if (isLoading) {
     return (
@@ -112,9 +116,17 @@ export default function DeliveryHomePage() {
 
   const onActionError = (err: unknown) => toast.error(getApiErrorMessage(err, 'Could not update the delivery.'));
 
+  // Must gate on assignmentOutcome === 'ACCEPTED', not just entry.status —
+  // a reassigned delivery has one history row per attempt, all sharing the
+  // same (current) delivery.status/deliveredAt, so checking those alone
+  // would count the same completed delivery once per missed/rejected
+  // attempt too (see myHistory()'s comment on this).
   const today = new Date().toDateString();
-  const completedToday = history?.filter((d) => d.deliveredAt && new Date(d.deliveredAt).toDateString() === today).length ?? 0;
-  const completedTotal = history?.filter((d) => d.status === 'DELIVERED').length ?? 0;
+  const completedDeliveries = history?.filter((d) => d.assignmentOutcome === 'ACCEPTED' && d.status === 'DELIVERED') ?? [];
+  const completedToday = completedDeliveries.filter(
+    (d) => d.deliveredAt && new Date(d.deliveredAt).toDateString() === today,
+  ).length;
+  const completedTotal = completedDeliveries.length;
 
   return (
     <main className="flex flex-col gap-6">
@@ -266,12 +278,49 @@ export default function DeliveryHomePage() {
                 >
                   Start delivery
                 </Button>
-              ) : (
-                <p className="flex items-center gap-1.5 text-sm text-(--color-muted-foreground)">
-                  <Clock className="size-3.5" aria-hidden />
-                  On the way — mark delivered once the customer confirms.
-                </p>
-              )}
+              ) : active.status === 'OUT_FOR_DELIVERY' ? (
+                <form
+                  className="flex w-full flex-col gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (otpInput.trim().length !== 6) return;
+                    completeMutation.mutate(
+                      { deliveryId: active.id, otpCode: otpInput.trim() },
+                      {
+                        onError: onActionError,
+                        onSuccess: () => {
+                          setOtpInput('');
+                          toast.success('Delivery completed');
+                        },
+                      },
+                    );
+                  }}
+                >
+                  <p className="flex items-center gap-1.5 text-xs text-(--color-muted-foreground)">
+                    <Clock className="size-3.5" aria-hidden />
+                    Ask the customer for their delivery code to complete.
+                  </p>
+                  <div className="flex gap-2">
+                    <FormField
+                      label="Delivery code"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder="6-digit code"
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      className="flex-1"
+                    />
+                    <Button
+                      type="submit"
+                      className="self-end"
+                      loading={completeMutation.isPending}
+                      disabled={otpInput.trim().length !== 6}
+                    >
+                      Complete
+                    </Button>
+                  </div>
+                </form>
+              ) : null}
             </div>
 
             <AlertDialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
@@ -301,32 +350,6 @@ export default function DeliveryHomePage() {
           </div>
         )}
       </div>
-
-      {history && history.length > 0 ? (
-        <div>
-          <h2 className="mb-3 text-sm font-semibold text-(--color-foreground)">Delivery history</h2>
-          <div className="flex flex-col gap-2">
-            {history.map((delivery) => (
-              <div
-                key={delivery.id}
-                className="flex items-center justify-between gap-4 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-3"
-              >
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-(--color-foreground)">
-                    #{delivery.order.orderNumber}
-                  </span>
-                  <span className="text-xs text-(--color-muted-foreground)">
-                    {delivery.deliveredAt ? formatDate(delivery.deliveredAt) : formatDate(delivery.updatedAt ?? delivery.createdAt)}
-                  </span>
-                </div>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${DELIVERY_STATUS_BADGE_CLASS[delivery.status]}`}>
-                  {DELIVERY_STATUS_LABEL[delivery.status]}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }

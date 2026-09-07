@@ -3,6 +3,9 @@ import type { DeliveryStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../../common/types/authenticated-request';
+import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
 import { DeliveryService } from './delivery.service';
 import { AssignDeliveryDto } from './dto/assign-delivery.dto';
 
@@ -21,7 +24,10 @@ const VALID_DELIVERY_STATUSES: DeliveryStatus[] = [
 @Controller('delivery')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class DeliveryController {
-  constructor(private readonly deliveryService: DeliveryService) {}
+  constructor(
+    private readonly deliveryService: DeliveryService,
+    private readonly deliveryPartnersService: DeliveryPartnersService,
+  ) {}
 
   @Get('admin/list')
   @Roles('ADMIN')
@@ -61,5 +67,63 @@ export class DeliveryController {
       throw new BadRequestException('id is required');
     }
     return this.deliveryService.adminAssign(deliveryId, dto.deliveryPartnerId);
+  }
+
+  @Get('my/active')
+  @Roles('DELIVERY_PARTNER')
+  async myActive(@CurrentUser() user: AuthenticatedUser) {
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myActive(partner.id);
+  }
+
+  @Get('my/history')
+  @Roles('DELIVERY_PARTNER')
+  async myHistory(@CurrentUser() user: AuthenticatedUser) {
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myHistory(partner.id);
+  }
+
+  @Post('my/accept')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  async myAccept(@CurrentUser() user: AuthenticatedUser, @Query('id') deliveryId: string | undefined) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myAccept(partner.id, deliveryId);
+  }
+
+  @Post('my/reject')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  async myReject(@CurrentUser() user: AuthenticatedUser, @Query('id') deliveryId: string | undefined) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myReject(partner.id, deliveryId);
+  }
+
+  @Post('my/pickup')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  async myPickup(@CurrentUser() user: AuthenticatedUser, @Query('id') deliveryId: string | undefined) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myPickup(partner.id, deliveryId);
+  }
+
+  @Post('my/start')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  async myStart(@CurrentUser() user: AuthenticatedUser, @Query('id') deliveryId: string | undefined) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myStart(partner.id, deliveryId);
   }
 }

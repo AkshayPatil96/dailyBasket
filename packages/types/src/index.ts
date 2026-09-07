@@ -273,7 +273,7 @@ export type DeliveryFailureReason =
   | 'CUSTOMER_REFUSED'
   | 'UNABLE_TO_CONTACT'
   | 'OTHER';
-export type DeliveryAssignmentOutcome = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REASSIGNED';
+export type DeliveryAssignmentOutcome = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REASSIGNED' | 'EXPIRED';
 
 export type OrderEventType =
   | 'ORDER_PLACED'
@@ -369,6 +369,22 @@ export interface DeliveryDetail extends DeliveryListItem {
   assignments: (DeliveryAssignment & {
     deliveryPartner: { user: Pick<User, 'firstName' | 'lastName'> };
   })[];
+}
+
+/** GET /delivery/my/active — full order (items, payment status) for fulfilling the delivery. */
+export interface PartnerDeliveryOrder extends Omit<Order, 'payment'> {
+  payment: { status: PaymentStatus } | null;
+}
+
+export interface PartnerActiveDelivery extends Delivery {
+  order: PartnerDeliveryOrder;
+  /** Only set while status is ASSIGNED — when the accept window runs out. */
+  acceptDeadlineAt?: string | null;
+}
+
+/** GET /delivery/my/history — a past delivery plus how it ended for this partner. */
+export interface PartnerHistoryDelivery extends DeliveryListItem {
+  assignmentOutcome: DeliveryAssignmentOutcome;
 }
 
 export interface OrderEvent {

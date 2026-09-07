@@ -100,12 +100,17 @@ enum DeliveryFailureReason {
 
 // PENDING here means "assigned, awaiting the partner's accept/reject" — one
 // row per assignment attempt, so reassigning never overwrites history (doc:
-// "Never overwrite assignment history").
+// "Never overwrite assignment history"). EXPIRED is distinct from REJECTED —
+// the partner never responded within the accept window, rather than
+// actively declining (see DeliveryService's accept-window cron). Kept
+// separate so a future "missed too many, warn/penalize" feature can count
+// EXPIRED specifically without conflating it with an explicit reject.
 enum DeliveryAssignmentOutcome {
   PENDING
   ACCEPTED
   REJECTED
   REASSIGNED
+  EXPIRED
 }
 
 enum OrderEventType {

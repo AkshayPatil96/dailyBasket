@@ -17,6 +17,7 @@ const ASSIGNMENT_OUTCOME_LABEL: Record<DeliveryAssignmentOutcome, string> = {
   ACCEPTED: 'Accepted',
   REJECTED: 'Rejected',
   REASSIGNED: 'Reassigned',
+  EXPIRED: 'Missed the accept window',
 };
 
 const TIMELINE_STEPS: { key: 'assignedAt' | 'acceptedAt' | 'pickedUpAt' | 'outForDeliveryAt' | 'deliveredAt'; label: string }[] = [

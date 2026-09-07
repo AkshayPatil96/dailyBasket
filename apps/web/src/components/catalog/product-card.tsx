@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import type { ProductSummary } from '@grocery-delivery/types';
 import { useCart, useAddToCart, useUpdateCartItem, useRemoveCartItem } from '@/hooks/use-cart';
+import { FavoriteButton } from '@/components/catalog/favorite-button';
 import { getApiErrorMessage } from '@/lib/api-client';
 
 export function ProductCard({ product }: { product: ProductSummary }) {
@@ -73,6 +74,15 @@ export function ProductCard({ product }: { product: ProductSummary }) {
             {discountPercent}% OFF
           </span>
         ) : null}
+        <div
+          className="absolute top-1.5 right-1.5 z-10"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+        >
+          <FavoriteButton productId={product.id} className="size-7 bg-(--color-card)/90" />
+        </div>
         {primaryImage ? (
           <Image
             src={primaryImage.url}

@@ -254,7 +254,26 @@ export interface OrderItem {
   lineTotal: string;
 }
 
-export type DeliveryStatus = 'PENDING' | 'PICKING' | 'PACKED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+export type DeliveryStatus =
+  | 'PENDING_ASSIGNMENT'
+  | 'ASSIGNED'
+  | 'ACCEPTED'
+  | 'PICKED_UP'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'REJECTED'
+  | 'CANCELLED'
+  | 'FAILED';
+
+export type DeliveryPartnerStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'INACTIVE';
+export type DeliveryPartnerAvailability = 'OFFLINE' | 'AVAILABLE' | 'BUSY';
+export type DeliveryFailureReason =
+  | 'CUSTOMER_UNAVAILABLE'
+  | 'WRONG_ADDRESS'
+  | 'CUSTOMER_REFUSED'
+  | 'UNABLE_TO_CONTACT'
+  | 'OTHER';
+export type DeliveryAssignmentOutcome = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REASSIGNED';
 
 export type OrderEventType =
   | 'ORDER_PLACED'
@@ -275,14 +294,44 @@ export interface Delivery {
   status: DeliveryStatus;
   currentLatitude?: number | null;
   currentLongitude?: number | null;
+  lastLocationAt?: string | null;
   deliveryNotes?: string | null;
+  otpExpiresAt?: string | null;
+  failureReason?: DeliveryFailureReason | null;
   assignedAt?: string | null;
-  pickingStartedAt?: string | null;
-  packedAt?: string | null;
+  acceptedAt?: string | null;
+  pickedUpAt?: string | null;
   outForDeliveryAt?: string | null;
   deliveredAt?: string | null;
+  failedAt?: string | null;
   createdAt: string;
   updatedAt?: string | null;
+  deliveryPartner?: DeliveryPartner | null;
+}
+
+export interface DeliveryPartner {
+  id: string;
+  userId: string;
+  status: DeliveryPartnerStatus;
+  availabilityStatus: DeliveryPartnerAvailability;
+  availableSince?: string | null;
+  vehicleType?: string | null;
+  vehicleNumber?: string | null;
+  currentLatitude?: number | null;
+  currentLongitude?: number | null;
+  lastLocationAt?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  user?: Pick<User, 'id' | 'firstName' | 'lastName' | 'phone'>;
+}
+
+export interface DeliveryAssignment {
+  id: string;
+  deliveryId: string;
+  deliveryPartnerId: string;
+  outcome: DeliveryAssignmentOutcome;
+  assignedAt: string;
+  respondedAt?: string | null;
 }
 
 export interface OrderEvent {

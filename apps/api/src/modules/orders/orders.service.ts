@@ -43,67 +43,52 @@ const ORDER_DETAIL_INCLUDE = {
 
 // Manual, admin-driven transitions only — CONFIRMED is reached automatically
 // at order creation (see finalizeOrderForPayment), never via this map.
-// Terminal states (DELIVERED, CANCELLED) and the two states an Order row
-// never actually occupies in this flow (PENDING_PAYMENT, PAYMENT_FAILED —
-// see the Order model comment) have no outgoing transitions.
+// OUT_FOR_DELIVERY and DELIVERED are no longer admin-settable here: they're
+// now a *side effect* of the Delivery state machine (a partner starting/
+// completing the delivery — see DeliveryService), which is why PACKED's only
+// manual next step is CANCELLED. OUT_FOR_DELIVERY -> CANCELLED stays open,
+// but only for the admin-review path after a FAILED delivery
+// (dailybasket-delivery-partner-operations.md "Failed Delivery"), not as a
+// general customer-facing status advance.
 const ALLOWED_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING_PAYMENT: [],
   PAYMENT_FAILED: [],
   CONFIRMED: ['PROCESSING', 'CANCELLED'],
   PROCESSING: ['PACKED', 'CANCELLED'],
-  PACKED: ['OUT_FOR_DELIVERY', 'CANCELLED'],
-  OUT_FOR_DELIVERY: ['DELIVERED'],
+  PACKED: ['CANCELLED'],
+  OUT_FOR_DELIVERY: ['CANCELLED'],
   DELIVERED: [],
   CANCELLED: [],
 };
 
-// Each manual Order transition mirrors onto the separate Delivery/fulfillment
-// state machine and appends an audit event — dailybasket-orders-order-tracking.md
-// §4-5 (separate state machines) and §9-10 (append-only OrderEvent).
+// Each manual Order transition appends an audit event — dailybasket-orders-
+// order-tracking.md §9-10 (append-only OrderEvent). Only CANCELLED still
+// mirrors onto Delivery here; PROCESSING/PACKED no longer touch it — Delivery
+// stays at PENDING_ASSIGNMENT (its default since creation) until an admin
+// actually assigns a partner.
 const TARGET_STATUS_EFFECTS: Partial<
-  Record<OrderStatus, { deliveryStatus: DeliveryStatus; eventType: OrderEventType }>
+  Record<OrderStatus, { eventType: OrderEventType; deliveryStatus?: DeliveryStatus }>
 > = {
-  PROCESSING: { deliveryStatus: 'PICKING', eventType: 'PICKING_STARTED' },
-  PACKED: { deliveryStatus: 'PACKED', eventType: 'ORDER_PACKED' },
-  OUT_FOR_DELIVERY: { deliveryStatus: 'OUT_FOR_DELIVERY', eventType: 'OUT_FOR_DELIVERY' },
-  DELIVERED: { deliveryStatus: 'DELIVERED', eventType: 'DELIVERED' },
-  CANCELLED: { deliveryStatus: 'CANCELLED', eventType: 'ORDER_CANCELLED' },
+  PROCESSING: { eventType: 'PICKING_STARTED' },
+  PACKED: { eventType: 'ORDER_PACKED' },
+  CANCELLED: { eventType: 'ORDER_CANCELLED', deliveryStatus: 'CANCELLED' },
 };
-
-interface DeliveryStatusFields {
-  status: DeliveryStatus;
-  pickingStartedAt?: Date;
-  packedAt?: Date;
-  outForDeliveryAt?: Date;
-  deliveredAt?: Date;
-}
-
-// Plain scalar values, not Prisma.DeliveryUpdateInput — this shape needs to
-// work as both a create() and an update() payload (see the upsert below).
-function deliveryUpdateFor(status: DeliveryStatus): DeliveryStatusFields {
-  const now = new Date();
-  switch (status) {
-    case 'PICKING':
-      return { status, pickingStartedAt: now };
-    case 'PACKED':
-      return { status, packedAt: now };
-    case 'OUT_FOR_DELIVERY':
-      return { status, outForDeliveryAt: now };
-    case 'DELIVERED':
-      return { status, deliveredAt: now };
-    default:
-      return { status };
-  }
-}
 
 // Which manual transitions notify the customer, and how — deliberately
 // excludes PROCESSING/PICKING_STARTED (internal, not customer-facing per
 // dailybasket-orders-order-tracking.md §15's notification examples).
+// OUT_FOR_DELIVERY/DELIVERED move to DELIVERY_DRIVEN_NOTIFICATIONS below.
 const NOTIFICATION_FOR_STATUS: Partial<Record<OrderStatus, { type: NotificationType; label: string }>> = {
   PACKED: { type: 'ORDER_PACKED', label: 'Packed' },
-  OUT_FOR_DELIVERY: { type: 'ORDER_OUT_FOR_DELIVERY', label: 'Out for delivery' },
-  DELIVERED: { type: 'ORDER_DELIVERED', label: 'Delivered' },
   CANCELLED: { type: 'ORDER_CANCELLED', label: 'Cancelled' },
+};
+
+// Fired by DeliveryService via syncOrderStatusFromDelivery(), not through
+// applyTransition() — these two Order statuses are reached as a side effect
+// of the partner's own actions, not a direct admin status update.
+const DELIVERY_DRIVEN_NOTIFICATIONS: Record<'OUT_FOR_DELIVERY' | 'DELIVERED', { type: NotificationType; label: string; eventType: OrderEventType }> = {
+  OUT_FOR_DELIVERY: { type: 'ORDER_OUT_FOR_DELIVERY', label: 'Out for delivery', eventType: 'OUT_FOR_DELIVERY' },
+  DELIVERED: { type: 'ORDER_DELIVERED', label: 'Delivered', eventType: 'DELIVERED' },
 };
 
 @Injectable()
@@ -261,7 +246,8 @@ export class OrdersService {
         });
       }
 
-      await tx.delivery.create({ data: { orderId: order.id, status: 'PENDING' } });
+      // status omitted — defaults to PENDING_ASSIGNMENT, same as the schema.
+      await tx.delivery.create({ data: { orderId: order.id } });
       // Order rows in this flow are only ever created post-payment (see the
       // Order model's status default), so all three happen together —
       // matches the doc's timeline example without pretending they were
@@ -480,14 +466,15 @@ export class OrdersService {
 
     return this.prisma.$transaction(async (tx) => {
       await tx.order.update({ where: { id: orderId }, data: { status: targetStatus } });
-      // upsert, not update — orders created before this feature shipped have
-      // no Delivery row at all.
-      const deliveryData = deliveryUpdateFor(effect.deliveryStatus);
-      await tx.delivery.upsert({
-        where: { orderId },
-        create: { orderId, ...deliveryData },
-        update: deliveryData,
-      });
+      if (effect.deliveryStatus) {
+        // upsert, not update — orders created before this feature shipped
+        // have no Delivery row at all.
+        await tx.delivery.upsert({
+          where: { orderId },
+          create: { orderId, status: effect.deliveryStatus },
+          update: { status: effect.deliveryStatus },
+        });
+      }
       await tx.orderEvent.create({
         data: { orderId, type: effect.eventType, message: reason, actorType, actorId },
       });
@@ -512,6 +499,32 @@ export class OrdersService {
       }
       return updatedOrder;
     });
+  }
+
+  // Called by DeliveryService from within its own transaction when a partner
+  // starts or completes a delivery — these two Order statuses are a side
+  // effect of the Delivery state machine now, not a direct admin action (see
+  // ALLOWED_TRANSITIONS above). Takes the caller's tx so the Order update and
+  // the Delivery update that triggered it commit or roll back together.
+  async syncOrderStatusFromDelivery(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    orderStatus: 'OUT_FOR_DELIVERY' | 'DELIVERED',
+  ): Promise<Order> {
+    const config = DELIVERY_DRIVEN_NOTIFICATIONS[orderStatus];
+    const order = await tx.order.update({ where: { id: orderId }, data: { status: orderStatus } });
+    await tx.orderEvent.create({
+      data: { orderId, type: config.eventType, actorType: 'SYSTEM' },
+    });
+    return order;
+  }
+
+  // Call after the transaction that called syncOrderStatusFromDelivery has
+  // committed — same "never let notification failure roll back a state
+  // transition" reasoning as applyTransition's post-commit .then().
+  async notifyDeliveryStatusChange(order: Order, orderStatus: 'OUT_FOR_DELIVERY' | 'DELIVERED'): Promise<void> {
+    const config = DELIVERY_DRIVEN_NOTIFICATIONS[orderStatus];
+    await this.notifyOrderUpdate(order, config.type, config.label);
   }
 
   private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {

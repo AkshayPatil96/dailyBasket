@@ -29,11 +29,11 @@ const STATUSES: OrderStatus[] = [
 // Mirrors OrdersService's ALLOWED_TRANSITIONS — the one-click "advance" shortcut
 // only ever offers the single, safe next step, never an arbitrary status
 // (cancellation needs a reason, so that stays in the detail page only).
+// PACKED has no next step here anymore — OUT_FOR_DELIVERY/DELIVERED are now
+// reached via delivery-partner assignment, not an admin click.
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   CONFIRMED: 'PROCESSING',
   PROCESSING: 'PACKED',
-  PACKED: 'OUT_FOR_DELIVERY',
-  OUT_FOR_DELIVERY: 'DELIVERED',
 };
 
 export default function AdminOrdersPage() {

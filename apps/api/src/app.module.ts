@@ -20,6 +20,7 @@ import { PaymentsModule } from './modules/payments/payments.module';
 import { CheckoutModule } from './modules/checkout/checkout.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
+import { DeliveryPartnersModule } from './modules/delivery-partners/delivery-partners.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { SettingsModule } from './modules/settings/settings.module';
 import { FavoritesModule } from './modules/favorites/favorites.module';
@@ -60,6 +61,7 @@ import { validateEnv } from './config/env.validation';
     CheckoutModule,
     InventoryModule,
     DeliveryModule,
+    DeliveryPartnersModule,
     CouponsModule,
     SettingsModule,
     FavoritesModule,

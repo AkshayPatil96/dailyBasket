@@ -45,7 +45,7 @@ async function main() {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, SALT_ROUNDS);
 
   for (const account of DEMO_ACCOUNTS) {
-    await prisma.user.upsert({
+    const user = await prisma.user.upsert({
       where: { email: account.email },
       update: {
         role: account.role,
@@ -65,6 +65,18 @@ async function main() {
       },
     });
     console.log(`Seeded ${account.role} demo account: ${account.email}`);
+
+    // Demo delivery partner needs an ACTIVE DeliveryPartner profile to be
+    // usable right away — a real partner would go through admin
+    // approval/activation instead of starting ACTIVE.
+    if (account.role === 'DELIVERY_PARTNER') {
+      await prisma.deliveryPartner.upsert({
+        where: { userId: user.id },
+        update: { status: 'ACTIVE' },
+        create: { userId: user.id, status: 'ACTIVE' },
+      });
+      console.log('Seeded DeliveryPartner profile for demo delivery account');
+    }
   }
 
   await prisma.$disconnect();

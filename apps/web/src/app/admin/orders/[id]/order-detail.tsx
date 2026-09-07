@@ -26,11 +26,13 @@ import {
 
 // Mirrors OrdersService's ALLOWED_TRANSITIONS — kept in sync manually since
 // this is presentation-only; the backend is what actually enforces it.
+// PACKED has no manual next status anymore: OUT_FOR_DELIVERY/DELIVERED are
+// now reached via the delivery-partner assignment flow, not an admin click
+// (see dailybasket-delivery-partner-operations.md) — the assign-partner UI
+// for PACKED orders lands with that feature.
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   CONFIRMED: 'PROCESSING',
   PROCESSING: 'PACKED',
-  PACKED: 'OUT_FOR_DELIVERY',
-  OUT_FOR_DELIVERY: 'DELIVERED',
 };
 
 const CANCELLABLE_STATUSES: OrderStatus[] = ['CONFIRMED', 'PROCESSING', 'PACKED'];
@@ -123,6 +125,12 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {order.status === 'PACKED' ? (
+        <p className="text-sm text-(--color-muted-foreground)">
+          Ready for delivery — partner assignment is coming soon.
+        </p>
       ) : null}
 
       <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">

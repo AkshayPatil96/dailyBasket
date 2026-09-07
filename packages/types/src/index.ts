@@ -315,6 +315,7 @@ export interface DeliveryPartner {
   status: DeliveryPartnerStatus;
   availabilityStatus: DeliveryPartnerAvailability;
   availableSince?: string | null;
+  lastSeenAt?: string | null;
   vehicleType?: string | null;
   vehicleNumber?: string | null;
   currentLatitude?: number | null;
@@ -325,6 +326,11 @@ export interface DeliveryPartner {
   user?: Pick<User, 'id' | 'firstName' | 'lastName' | 'phone'>;
 }
 
+/** GET /delivery-partners/admin/list — same shape, but with email too. */
+export interface DeliveryPartnerAdminItem extends DeliveryPartner {
+  user?: Pick<User, 'id' | 'firstName' | 'lastName' | 'phone' | 'email'>;
+}
+
 export interface DeliveryAssignment {
   id: string;
   deliveryId: string;
@@ -332,6 +338,37 @@ export interface DeliveryAssignment {
   outcome: DeliveryAssignmentOutcome;
   assignedAt: string;
   respondedAt?: string | null;
+}
+
+export interface DeliveryOrderSummary {
+  id: string;
+  orderNumber: string;
+  recipientName: string;
+  phone: string;
+  city: string;
+  state: string;
+  total: string;
+  createdAt: string;
+}
+
+/** GET /delivery/admin/unassigned — a Delivery still PENDING_ASSIGNMENT for a PACKED order. */
+export interface UnassignedDelivery {
+  id: string;
+  status: DeliveryStatus;
+  createdAt: string;
+  order: DeliveryOrderSummary;
+}
+
+/** GET /delivery/admin/list — the full operational view, every delivery. */
+export interface DeliveryListItem extends Delivery {
+  order: DeliveryOrderSummary;
+}
+
+/** GET /delivery/admin?id= — a DeliveryListItem plus its full assignment history. */
+export interface DeliveryDetail extends DeliveryListItem {
+  assignments: (DeliveryAssignment & {
+    deliveryPartner: { user: Pick<User, 'firstName' | 'lastName'> };
+  })[];
 }
 
 export interface OrderEvent {

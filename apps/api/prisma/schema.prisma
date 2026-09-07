@@ -781,6 +781,10 @@ model DeliveryPartner {
   // Admin's assignment picker sorts by this ascending — longest-idle-first
   // FIFO, see dailybasket-delivery-partner-operations.md "Assignment".
   availableSince DateTime? @map("available_since")
+  // Bumped on every availability toggle (either direction) — unlike
+  // availableSince, this is never cleared, so the admin partner list can
+  // show "last seen" for someone who's currently OFFLINE.
+  lastSeenAt DateTime? @map("last_seen_at")
 
   vehicleType      String?   @map("vehicle_type")
   vehicleNumber    String?   @map("vehicle_number")

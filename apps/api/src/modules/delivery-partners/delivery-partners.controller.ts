@@ -9,18 +9,25 @@ import { UpdateAvailabilityDto } from './dto/update-availability.dto';
 
 @Controller('delivery-partners')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('DELIVERY_PARTNER')
 export class DeliveryPartnersController {
   constructor(private readonly deliveryPartnersService: DeliveryPartnersService) {}
 
   @Get('me')
+  @Roles('DELIVERY_PARTNER')
   async getMe(@CurrentUser() user: AuthenticatedUser) {
     return this.deliveryPartnersService.getMyProfile(user.id);
   }
 
   @Post('me/availability')
   @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
   async setAvailability(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateAvailabilityDto) {
     return this.deliveryPartnersService.setAvailability(user.id, dto.availability);
+  }
+
+  @Get('admin/list')
+  @Roles('ADMIN')
+  async adminList() {
+    return this.deliveryPartnersService.adminList();
   }
 }

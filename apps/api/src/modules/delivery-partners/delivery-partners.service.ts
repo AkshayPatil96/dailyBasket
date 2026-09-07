@@ -46,12 +46,23 @@ export class DeliveryPartnersService {
       }
     }
 
+    const now = new Date();
     return this.prisma.deliveryPartner.update({
       where: { id: partner.id },
       data: {
         availabilityStatus: availability,
-        availableSince: availability === 'AVAILABLE' ? new Date() : null,
+        availableSince: availability === 'AVAILABLE' ? now : null,
+        lastSeenAt: now,
       },
+    });
+  }
+
+  // Every partner, active or not — the admin management table (status,
+  // availability, and last-seen for anyone currently offline).
+  async adminList() {
+    return this.prisma.deliveryPartner.findMany({
+      orderBy: { lastSeenAt: 'desc' },
+      include: { user: { select: { id: true, firstName: true, lastName: true, phone: true, email: true } } },
     });
   }
 }

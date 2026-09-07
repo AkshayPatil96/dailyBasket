@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { href: '/admin/categories', label: 'Categories' },
   { href: '/admin/products', label: 'Products' },
   { href: '/admin/orders', label: 'Orders' },
+  { href: '/admin/deliveries', label: 'Deliveries' },
+  { href: '/admin/delivery-partners', label: 'Delivery Partners' },
   { href: '/admin/coupons', label: 'Coupons' },
   { href: '/admin/settings', label: 'Settings' },
 ];

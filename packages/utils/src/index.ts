@@ -11,6 +11,15 @@ export function formatDate(isoString: string): string {
   }).format(new Date(isoString));
 }
 
+export function formatRelativeTime(isoString: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(isoString).getTime()) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export function slugify(input: string): string {
   return input
     .toLowerCase()

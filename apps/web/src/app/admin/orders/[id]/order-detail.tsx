@@ -10,6 +10,7 @@ import type { OrderStatus } from '@grocery-delivery/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { OrderTimeline } from '@/components/orders/order-timeline';
+import { AssignPartnerPicker } from '@/components/admin/assign-partner-picker';
 import { getApiErrorMessage } from '@/lib/api-client';
 import { adminOrdersApi } from '@/lib/admin-orders-api';
 import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
@@ -23,6 +24,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+
+const DELIVERY_STATUS_LABEL: Record<string, string> = {
+  PENDING_ASSIGNMENT: 'Waiting for assignment',
+  ASSIGNED: 'Assigned',
+  ACCEPTED: 'Accepted',
+  PICKED_UP: 'Picked up',
+  OUT_FOR_DELIVERY: 'Out for delivery',
+  DELIVERED: 'Delivered',
+  REJECTED: 'Rejected by partner',
+  CANCELLED: 'Cancelled',
+  FAILED: 'Failed',
+};
 
 // Mirrors OrdersService's ALLOWED_TRANSITIONS — kept in sync manually since
 // this is presentation-only; the backend is what actually enforces it.
@@ -41,6 +55,7 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   const queryClient = useQueryClient();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
 
   const { data: order, isLoading } = useQuery({
     queryKey: ['admin', 'orders', orderId],
@@ -127,10 +142,53 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         </div>
       ) : null}
 
-      {order.status === 'PACKED' ? (
-        <p className="text-sm text-(--color-muted-foreground)">
-          Ready for delivery — partner assignment is coming soon.
-        </p>
+      {order.status === 'PACKED' && order.delivery ? (
+        <div className="flex items-center justify-between gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
+          {order.delivery.status === 'PENDING_ASSIGNMENT' ? (
+            <>
+              <p className="text-sm text-(--color-muted-foreground)">Ready for delivery — no partner assigned yet.</p>
+              <Button size="sm" onClick={() => setShowAssignDialog(true)}>
+                Assign delivery
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium text-(--color-foreground)">
+                  {DELIVERY_STATUS_LABEL[order.delivery.status] ?? order.delivery.status}
+                </span>
+                {order.delivery.deliveryPartner?.user ? (
+                  <span className="text-xs text-(--color-muted-foreground)">
+                    {order.delivery.deliveryPartner.user.firstName} {order.delivery.deliveryPartner.user.lastName}
+                  </span>
+                ) : null}
+              </div>
+              <Link
+                href={`/admin/deliveries/${order.delivery.id}`}
+                className="text-sm font-medium text-(--color-primary) hover:underline"
+              >
+                View delivery
+              </Link>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {order.delivery ? (
+        <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Assign a delivery partner</DialogTitle>
+            </DialogHeader>
+            <AssignPartnerPicker
+              deliveryId={order.delivery.id}
+              onAssigned={() => {
+                setShowAssignDialog(false);
+                queryClient.invalidateQueries({ queryKey: ['admin', 'orders', orderId] });
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       ) : null}
 
       <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">

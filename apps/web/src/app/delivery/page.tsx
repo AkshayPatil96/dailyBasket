@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Clock, Loader2, MapPin, Package, Phone, Power } from 'lucide-react';
+import { Clock, Loader2, MapPin, Navigation, Package, Phone, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import { useMyDeliveryPartnerProfile, useSetAvailability } from '@/hooks/use-delivery-partner';
@@ -23,7 +23,7 @@ import {
   DELIVERY_STATUS_BADGE_CLASS,
   DELIVERY_STATUS_LABEL,
 } from '@/lib/delivery-status';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -78,6 +78,27 @@ function AcceptCountdown({ deadlineIso }: { deadlineIso: string }) {
         : 'Accept window expired — refreshing…'}
     </span>
   );
+}
+
+// Prefers the snapshotted lat/lng (set at checkout, see the address-location
+// doc) over the text address — more accurate, and Maps still geocodes a
+// plain address fine as a fallback for older orders placed before that
+// snapshot existed.
+function googleMapsDirectionsUrl(order: {
+  latitude?: number | null;
+  longitude?: number | null;
+  line1: string;
+  line2?: string | null;
+  landmark?: string | null;
+  city: string;
+  state: string;
+  postalCode: string;
+}): string {
+  const destination =
+    order.latitude != null && order.longitude != null
+      ? `${order.latitude},${order.longitude}`
+      : [order.line1, order.line2, order.landmark, order.city, order.state, order.postalCode].filter(Boolean).join(', ');
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`;
 }
 
 export default function DeliveryHomePage() {
@@ -240,6 +261,15 @@ export default function DeliveryHomePage() {
                 {active.order.landmark ? ` (near ${active.order.landmark})` : ''}, {active.order.city},{' '}
                 {active.order.state} {active.order.postalCode}
               </span>
+              <a
+                href={googleMapsDirectionsUrl(active.order)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'self-start')}
+              >
+                <Navigation className="size-3.5" aria-hidden />
+                Navigate
+              </a>
             </div>
 
             <div className="flex flex-col gap-1 border-t border-(--color-border) pt-3 text-sm">

@@ -101,6 +101,26 @@ export default function CheckoutPage() {
     onError: (error) => toast.error(getApiErrorMessage(error, 'Payment verification failed.')),
   });
 
+  const devCompleteMutation = useMutation({
+    mutationFn: () => checkoutApi.devCompletePayment(sessionId!),
+    onSuccess: (order) => {
+      setConfirmedOrder(order);
+      setStep('confirmed');
+      queryClient.invalidateQueries({ queryKey: cartQueryKey });
+      toast.success('Order placed (dev — payment skipped)');
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, 'Could not skip payment.')),
+  });
+
+  // Dev convenience: reserves stock/pricing the same way handlePay() does via
+  // createPayment, then marks it captured directly instead of opening
+  // Razorpay's checkout modal. See CheckoutService.devCompletePayment.
+  const handleSkipPayment = async () => {
+    if (!sessionId) return;
+    await createPaymentMutation.mutateAsync();
+    devCompleteMutation.mutate();
+  };
+
   const handlePay = async () => {
     if (!sessionId) return;
     const payment = await createPaymentMutation.mutateAsync();
@@ -358,6 +378,16 @@ export default function CheckoutPage() {
                   Pay {formatCurrency(cart.total)}
                 </Button>
               </div>
+              {process.env.NODE_ENV !== 'production' ? (
+                <Button
+                  variant="outline"
+                  className="self-start text-xs text-(--color-muted-foreground)"
+                  loading={devCompleteMutation.isPending}
+                  onClick={handleSkipPayment}
+                >
+                  Skip payment (dev only)
+                </Button>
+              ) : null}
             </div>
           )}
     </main>

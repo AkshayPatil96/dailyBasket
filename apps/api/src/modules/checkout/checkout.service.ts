@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -334,6 +335,33 @@ export class CheckoutService {
     await this.prisma.payment.update({
       where: { id: payment.id },
       data: { status: 'CAPTURED', providerPaymentId: dto.razorpayPaymentId },
+    });
+    return this.ordersService.finalizeOrderForPayment(payment.id);
+  }
+
+  // Local-dev-only convenience — skips Razorpay entirely so manual testing of
+  // everything *after* checkout (order tracking, delivery flow, etc.) doesn't
+  // require clicking through Razorpay's test-mode UI every time. Controller
+  // gates this to non-production; it's not a real payment method (no COD
+  // support exists — see dailybasket-checkout-architecture.md's "Advanced /
+  // Later" list) and must never be reachable in production.
+  async devCompletePayment(
+    sessionId: string,
+    userId: string | undefined,
+    guestCartId: string | undefined,
+  ): Promise<Order> {
+    const session = await this.getOwnedSession(sessionId, userId, guestCartId);
+    const payment = await this.prisma.payment.findUnique({ where: { checkoutSessionId: session.id } });
+    if (!payment) {
+      throw new NotFoundException('No payment found for this checkout session — call payment/create first');
+    }
+    if (payment.orderId) {
+      return this.ordersService.finalizeOrderForPayment(payment.id);
+    }
+
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: 'CAPTURED', providerPaymentId: `dev_${randomUUID()}` },
     });
     return this.ordersService.finalizeOrderForPayment(payment.id);
   }

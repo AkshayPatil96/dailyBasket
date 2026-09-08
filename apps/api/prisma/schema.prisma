@@ -98,6 +98,15 @@ enum DeliveryFailureReason {
   OTHER
 }
 
+// Distinct from DeliveryFailureReason — this is the partner declining an
+// assignment before ever accepting it, not a failed-after-accepting delivery.
+enum DeliveryRejectionReason {
+  TOO_FAR
+  ALREADY_BUSY
+  VEHICLE_ISSUE
+  OTHER
+}
+
 // PENDING here means "assigned, awaiting the partner's accept/reject" — one
 // row per assignment attempt, so reassigning never overwrites history (doc:
 // "Never overwrite assignment history"). EXPIRED is distinct from REJECTED —
@@ -757,7 +766,14 @@ model Delivery {
   otpCode      String?   @map("otp_code")
   otpExpiresAt DateTime? @map("otp_expires_at") @db.Timestamptz
 
-  failureReason DeliveryFailureReason? @map("failure_reason")
+  failureReason   DeliveryFailureReason?   @map("failure_reason")
+  // Mirrors DeliveryAssignment's own copy (the permanent per-attempt record)
+  // — this one only ever reflects the latest attempt, same as failureReason,
+  // and is reset by adminAssign() on every (re)assign.
+  rejectionReason DeliveryRejectionReason? @map("rejection_reason")
+  // Free text, required by the frontend only when rejectionReason is OTHER —
+  // the enum alone doesn't say anything for that case.
+  rejectionNote   String?                  @map("rejection_note")
 
   assignedAt       DateTime? @map("assigned_at") @db.Timestamptz
   acceptedAt       DateTime? @map("accepted_at") @db.Timestamptz
@@ -821,6 +837,22 @@ model DeliveryAssignment {
   outcome           DeliveryAssignmentOutcome @default(PENDING)
   assignedAt        DateTime                  @default(now()) @map("assigned_at") @db.Timestamptz
   respondedAt       DateTime?                 @map("responded_at") @db.Timestamptz
+
+  // Mirrors the same-named fields on Delivery, but scoped to *this* attempt
+  // — Delivery's own copies only ever reflect the current/latest attempt
+  // (adminAssign() nulls them out on every reassign). Without these, a
+  // delivery that failed under Partner A and was then delivered by Partner
+  // B would show "Delivered" on both attempts in history, since they'd
+  // share Delivery's single deliveredAt.
+  pickedUpAt       DateTime?                @map("picked_up_at") @db.Timestamptz
+  outForDeliveryAt DateTime?                @map("out_for_delivery_at") @db.Timestamptz
+  deliveredAt      DateTime?                @map("delivered_at") @db.Timestamptz
+  failedAt         DateTime?                @map("failed_at") @db.Timestamptz
+  failureReason    DeliveryFailureReason?   @map("failure_reason")
+  // Required by the myReject endpoint — a partner can't decline an
+  // assignment without giving a reason (see DeliveryController.myReject).
+  rejectionReason  DeliveryRejectionReason? @map("rejection_reason")
+  rejectionNote    String?                  @map("rejection_note")
 
   delivery        Delivery        @relation(fields: [deliveryId], references: [id])
   deliveryPartner DeliveryPartner @relation(fields: [deliveryPartnerId], references: [id])

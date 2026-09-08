@@ -45,4 +45,8 @@ export const checkoutApi = {
 
   verifyPayment: (sessionId: string, input: VerifyPaymentInput) =>
     apiClient.post<Order>(`/checkout/payment/verify?id=${sessionId}`, input).then((res) => res.data),
+
+  // Dev-only — 404s in production, see CheckoutController.devCompletePayment.
+  devCompletePayment: (sessionId: string) =>
+    apiClient.post<Order>(`/checkout/payment/dev-complete?id=${sessionId}`).then((res) => res.data),
 };

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { DeliveryFailureReason, DeliveryRejectionReason } from '@grocery-delivery/types';
 import { deliveryApi } from '@/lib/delivery-api';
 
 const ACTIVE_QUERY_KEY = ['delivery', 'my', 'active'] as const;
@@ -40,7 +41,10 @@ export function useAcceptDelivery() {
 }
 
 export function useRejectDelivery() {
-  return useDeliveryAction(deliveryApi.reject);
+  return useDeliveryAction(
+    ({ deliveryId, reason, note }: { deliveryId: string; reason: DeliveryRejectionReason; note?: string }) =>
+      deliveryApi.reject(deliveryId, reason, note),
+  );
 }
 
 export function usePickupDelivery() {
@@ -54,5 +58,11 @@ export function useStartDelivery() {
 export function useCompleteDelivery() {
   return useDeliveryAction(({ deliveryId, otpCode }: { deliveryId: string; otpCode: string }) =>
     deliveryApi.complete(deliveryId, otpCode),
+  );
+}
+
+export function useFailDelivery() {
+  return useDeliveryAction(({ deliveryId, reason }: { deliveryId: string; reason: DeliveryFailureReason }) =>
+    deliveryApi.fail(deliveryId, reason),
   );
 }

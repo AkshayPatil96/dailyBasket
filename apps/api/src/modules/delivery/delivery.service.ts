@@ -1,7 +1,14 @@
 import { randomInt, timingSafeEqual } from 'node:crypto';
 import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import type { Delivery, DeliveryStatus } from '@prisma/client';
+import type {
+  Delivery,
+  DeliveryAssignmentOutcome,
+  DeliveryFailureReason,
+  DeliveryRejectionReason,
+  DeliveryStatus,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 
@@ -9,10 +16,6 @@ import { OrdersService } from '../orders/orders.service';
 // is the normal case, ASSIGNED covers reassigning before the partner
 // responds, REJECTED/FAILED cover retrying after something went wrong.
 const ASSIGNABLE_STATUSES: DeliveryStatus[] = ['PENDING_ASSIGNMENT', 'ASSIGNED', 'REJECTED', 'FAILED'];
-
-// Terminal, for-this-partner-only purposes: once a delivery lands here it
-// drops out of "my active delivery" and into "my history".
-const PARTNER_TERMINAL_STATUSES: DeliveryStatus[] = ['DELIVERED', 'FAILED', 'CANCELLED'];
 
 // How long a partner has to accept/reject before the assignment auto-expires
 // and the delivery goes back to the unassigned queue for admin to reassign
@@ -44,6 +47,42 @@ const DELIVERY_LIST_ORDER_INCLUDE = {
   },
   deliveryPartner: { include: { user: { select: { id: true, firstName: true, lastName: true, phone: true } } } },
 } as const;
+
+// admin/deliveries is one row per DeliveryAssignment attempt, not per
+// Delivery — a reassigned-then-retried order shows its rejected/failed
+// attempt AND its eventual success as separate rows, matching how the
+// partner's own /delivery/history works (see myHistory() below). Fully
+// derived from the assignment's own fields, same as PartnerHistoryDelivery's
+// frontend rendering — no dependency on Delivery's shared/current-only status.
+export type AdminDeliveryAssignmentStatus =
+  | 'ASSIGNED'
+  | 'ACCEPTED'
+  | 'PICKED_UP'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'REASSIGNED';
+
+function computeAssignmentDisplayStatus(assignment: {
+  outcome: DeliveryAssignmentOutcome;
+  pickedUpAt: Date | null;
+  outForDeliveryAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+}): AdminDeliveryAssignmentStatus {
+  if (assignment.outcome !== 'ACCEPTED') {
+    // PENDING (still awaiting response) displays the same as a fresh
+    // assignment — REJECTED/EXPIRED/REASSIGNED are already terminal labels.
+    return assignment.outcome === 'PENDING' ? 'ASSIGNED' : assignment.outcome;
+  }
+  if (assignment.deliveredAt) return 'DELIVERED';
+  if (assignment.failedAt) return 'FAILED';
+  if (assignment.outForDeliveryAt) return 'OUT_FOR_DELIVERY';
+  if (assignment.pickedUpAt) return 'PICKED_UP';
+  return 'ACCEPTED';
+}
 
 // Everything a partner needs to actually fulfil the delivery — doc's
 // "Active Delivery" section: customer name/phone, address, items, quantity,
@@ -141,15 +180,39 @@ export class DeliveryService {
     });
   }
 
-  // Full operational view — every delivery, optionally filtered to one
-  // status, most recently active first. Distinct from adminListUnassigned()
-  // which is specifically the assignment queue (PACKED + PENDING_ASSIGNMENT).
-  async adminList(status?: DeliveryStatus) {
-    return this.prisma.delivery.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { updatedAt: 'desc' },
-      include: DELIVERY_LIST_ORDER_INCLUDE,
+  // The audit trail, not the assignment queue — one row per assignment
+  // attempt (see AdminDeliveryAssignmentStatus's comment above), so a
+  // rejected-then-retried-and-delivered order shows up as two separate rows,
+  // not one row silently overwritten by whatever the latest attempt did.
+  // The unassigned queue itself is adminListUnassigned() (PACKED +
+  // PENDING_ASSIGNMENT, which has no assignment yet at all); assign/retry
+  // actions live on the order page, not here.
+  async adminList(status?: AdminDeliveryAssignmentStatus) {
+    const assignments = await this.prisma.deliveryAssignment.findMany({
+      orderBy: { assignedAt: 'desc' },
+      include: {
+        delivery: { include: { order: { select: DELIVERY_LIST_ORDER_INCLUDE.order.select } } },
+        deliveryPartner: { include: { user: { select: { id: true, firstName: true, lastName: true, phone: true } } } },
+      },
     });
+    const mapped = assignments.map((assignment) => ({
+      id: assignment.id,
+      deliveryId: assignment.deliveryId,
+      order: assignment.delivery.order,
+      deliveryPartner: assignment.deliveryPartner,
+      outcome: assignment.outcome,
+      displayStatus: computeAssignmentDisplayStatus(assignment),
+      assignedAt: assignment.assignedAt,
+      respondedAt: assignment.respondedAt,
+      pickedUpAt: assignment.pickedUpAt,
+      outForDeliveryAt: assignment.outForDeliveryAt,
+      deliveredAt: assignment.deliveredAt,
+      failedAt: assignment.failedAt,
+      failureReason: assignment.failureReason,
+      rejectionReason: assignment.rejectionReason,
+      rejectionNote: assignment.rejectionNote,
+    }));
+    return status ? mapped.filter((item) => item.displayStatus === status) : mapped;
   }
 
   async adminGetOne(id: string) {
@@ -166,7 +229,17 @@ export class DeliveryService {
     if (!delivery) {
       throw new NotFoundException('Delivery not found');
     }
-    return delivery;
+    // Same derivation as adminList() — each assignment's own displayStatus,
+    // so a rejected/failed attempt can be viewed on its own (via
+    // ?assignment=<id>) without the Delivery's shared/current-only status
+    // (which by then belongs to whichever attempt is latest) bleeding in.
+    return {
+      ...delivery,
+      assignments: delivery.assignments.map((assignment) => ({
+        ...assignment,
+        displayStatus: computeAssignmentDisplayStatus(assignment),
+      })),
+    };
   }
 
   async adminAssign(deliveryId: string, deliveryPartnerId: string): Promise<Delivery> {
@@ -211,7 +284,24 @@ export class DeliveryService {
 
       return tx.delivery.update({
         where: { id: deliveryId },
-        data: { deliveryPartnerId, status: 'ASSIGNED', assignedAt: new Date() },
+        // Clears every field from a previous attempt (matters most for a
+        // retry after REJECTED/FAILED — otherwise the new partner's timeline
+        // would start showing a stale pickedUpAt/otpCode left over from
+        // whoever had it before them).
+        data: {
+          deliveryPartnerId,
+          status: 'ASSIGNED',
+          assignedAt: new Date(),
+          acceptedAt: null,
+          pickedUpAt: null,
+          outForDeliveryAt: null,
+          failedAt: null,
+          failureReason: null,
+          rejectionReason: null,
+          rejectionNote: null,
+          otpCode: null,
+          otpExpiresAt: null,
+        },
         include: {
           order: { select: { orderNumber: true } },
           deliveryPartner: { include: { user: { select: { firstName: true, lastName: true } } } },
@@ -268,8 +358,9 @@ export class DeliveryService {
   // latter only ever holds the *current* partner, so a delivery this partner
   // was later reassigned away from would otherwise vanish from their own
   // history. REJECTED/EXPIRED are terminal for them immediately; an ACCEPTED
-  // one only counts once the delivery itself reached a terminal status
-  // (still-in-progress ones belong in myActive(), not history).
+  // one only counts once *this attempt* reached a terminal outcome (its own
+  // deliveredAt/failedAt, not Delivery's shared one — see the field comment
+  // on DeliveryAssignment) — still-in-progress ones belong in myActive().
   async myHistory(deliveryPartnerId: string) {
     const assignments = await this.prisma.deliveryAssignment.findMany({
       where: {
@@ -277,7 +368,7 @@ export class DeliveryService {
         OR: [
           { outcome: 'REJECTED' },
           { outcome: 'EXPIRED' },
-          { outcome: 'ACCEPTED', delivery: { status: { in: PARTNER_TERMINAL_STATUSES } } },
+          { outcome: 'ACCEPTED', OR: [{ deliveredAt: { not: null } }, { failedAt: { not: null } }] },
         ],
       },
       orderBy: { assignedAt: 'desc' },
@@ -286,19 +377,55 @@ export class DeliveryService {
     });
     // The same Delivery row can appear once per assignment attempt (a
     // reassigned-then-retried delivery has multiple DeliveryAssignment rows
-    // pointing at one Delivery), so its own status/timestamps are the same
-    // on every row here — the assignment's *own* outcome/assignedAt/
-    // respondedAt are what actually varies per history entry.
+    // pointing at one Delivery) — only order/partner-independent fields
+    // (order, recipient, etc.) come from `delivery`; every timestamp/outcome
+    // field is the assignment's own, never Delivery's shared copy.
     return assignments.map((assignment) => {
-      const { otpCode: _otpCode, ...delivery } = assignment.delivery;
+      const {
+        otpCode: _otpCode,
+        status: _status,
+        pickedUpAt: _pickedUpAt,
+        outForDeliveryAt: _outForDeliveryAt,
+        deliveredAt: _deliveredAt,
+        failedAt: _failedAt,
+        failureReason: _failureReason,
+        rejectionReason: _rejectionReason,
+        rejectionNote: _rejectionNote,
+        ...delivery
+      } = assignment.delivery;
       return {
         ...delivery,
         assignmentId: assignment.id,
         assignmentOutcome: assignment.outcome,
         assignmentAssignedAt: assignment.assignedAt,
         assignmentRespondedAt: assignment.respondedAt,
+        assignmentPickedUpAt: assignment.pickedUpAt,
+        assignmentOutForDeliveryAt: assignment.outForDeliveryAt,
+        assignmentDeliveredAt: assignment.deliveredAt,
+        assignmentFailedAt: assignment.failedAt,
+        assignmentFailureReason: assignment.failureReason,
+        assignmentRejectionReason: assignment.rejectionReason,
+        assignmentRejectionNote: assignment.rejectionNote,
       };
     });
+  }
+
+  // The assignment row for whoever currently holds the delivery — reassigning
+  // (even back to the same partner) always creates a new row, so "most
+  // recent by assignedAt" is always the live one. Used to mirror lifecycle
+  // timestamps onto the assignment (see DeliveryAssignment's field comment)
+  // so a later reassignment's outcome never bleeds into this attempt's record.
+  private async currentAssignmentId(
+    tx: Prisma.TransactionClient,
+    deliveryId: string,
+    deliveryPartnerId: string,
+  ): Promise<string> {
+    const assignment = await tx.deliveryAssignment.findFirstOrThrow({
+      where: { deliveryId, deliveryPartnerId },
+      orderBy: { assignedAt: 'desc' },
+      select: { id: true },
+    });
+    return assignment.id;
   }
 
   private async assertOwnedDelivery(
@@ -332,12 +459,17 @@ export class DeliveryService {
 
   // Frees the partner immediately — see doc's Availability section, a
   // rejection isn't "busy" anymore, they're back in the pool.
-  async myReject(deliveryPartnerId: string, deliveryId: string): Promise<Delivery> {
+  async myReject(
+    deliveryPartnerId: string,
+    deliveryId: string,
+    reason: DeliveryRejectionReason,
+    note?: string,
+  ): Promise<Delivery> {
     return this.prisma.$transaction(async (tx) => {
       await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'ASSIGNED');
       await tx.deliveryAssignment.updateMany({
         where: { deliveryId, deliveryPartnerId, outcome: 'PENDING' },
-        data: { outcome: 'REJECTED', respondedAt: new Date() },
+        data: { outcome: 'REJECTED', respondedAt: new Date(), rejectionReason: reason, rejectionNote: note },
       });
       await tx.deliveryPartner.update({
         where: { id: deliveryPartnerId },
@@ -345,7 +477,7 @@ export class DeliveryService {
       });
       return tx.delivery.update({
         where: { id: deliveryId },
-        data: { status: 'REJECTED', deliveryPartnerId: null },
+        data: { status: 'REJECTED', deliveryPartnerId: null, rejectionReason: reason, rejectionNote: note },
       });
     });
   }
@@ -353,7 +485,10 @@ export class DeliveryService {
   async myPickup(deliveryPartnerId: string, deliveryId: string): Promise<Delivery> {
     return this.prisma.$transaction(async (tx) => {
       await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'ACCEPTED');
-      return tx.delivery.update({ where: { id: deliveryId }, data: { status: 'PICKED_UP', pickedUpAt: new Date() } });
+      const pickedUpAt = new Date();
+      const assignmentId = await this.currentAssignmentId(tx, deliveryId, deliveryPartnerId);
+      await tx.deliveryAssignment.update({ where: { id: assignmentId }, data: { pickedUpAt } });
+      return tx.delivery.update({ where: { id: deliveryId }, data: { status: 'PICKED_UP', pickedUpAt } });
     });
   }
 
@@ -366,11 +501,14 @@ export class DeliveryService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const delivery = await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'PICKED_UP');
+      const outForDeliveryAt = new Date();
+      const assignmentId = await this.currentAssignmentId(tx, deliveryId, deliveryPartnerId);
+      await tx.deliveryAssignment.update({ where: { id: assignmentId }, data: { outForDeliveryAt } });
       const result = await tx.delivery.update({
         where: { id: deliveryId },
         data: {
           status: 'OUT_FOR_DELIVERY',
-          outForDeliveryAt: new Date(),
+          outForDeliveryAt,
           otpCode: otp,
           otpExpiresAt: new Date(Date.now() + OTP_TTL_MS),
         },
@@ -398,9 +536,12 @@ export class DeliveryService {
         throw new ConflictException('Incorrect delivery code');
       }
 
+      const deliveredAt = new Date();
+      const assignmentId = await this.currentAssignmentId(tx, deliveryId, deliveryPartnerId);
+      await tx.deliveryAssignment.update({ where: { id: assignmentId }, data: { deliveredAt } });
       const result = await tx.delivery.update({
         where: { id: deliveryId },
-        data: { status: 'DELIVERED', deliveredAt: new Date(), otpCode: null, otpExpiresAt: null },
+        data: { status: 'DELIVERED', deliveredAt, otpCode: null, otpExpiresAt: null },
       });
       await tx.deliveryPartner.update({
         where: { id: deliveryPartnerId },
@@ -413,5 +554,29 @@ export class DeliveryService {
     const order = await this.prisma.order.findUniqueOrThrow({ where: { id: updated.orderId } });
     await this.ordersService.notifyDeliveryStatusChange(order, 'DELIVERED');
     return updated;
+  }
+
+  // Doc's Failed Delivery flow: only reachable from OUT_FOR_DELIVERY (every
+  // listed reason — customer unavailable, wrong address, refused, unable to
+  // contact — only makes sense once the partner has actually reached the
+  // customer). Does NOT touch Order.status or trigger a refund — that's
+  // deliberately left to admin review (adminAssign already accepts FAILED
+  // for a retry; a plain order cancel handles the "give up" path, both
+  // reusing existing endpoints rather than new ones for this).
+  async myFail(deliveryPartnerId: string, deliveryId: string, reason: DeliveryFailureReason): Promise<Delivery> {
+    return this.prisma.$transaction(async (tx) => {
+      await this.assertOwnedDelivery(deliveryPartnerId, deliveryId, 'OUT_FOR_DELIVERY');
+      const failedAt = new Date();
+      const assignmentId = await this.currentAssignmentId(tx, deliveryId, deliveryPartnerId);
+      await tx.deliveryAssignment.update({ where: { id: assignmentId }, data: { failedAt, failureReason: reason } });
+      await tx.deliveryPartner.update({
+        where: { id: deliveryPartnerId },
+        data: { availabilityStatus: 'AVAILABLE', availableSince: new Date() },
+      });
+      return tx.delivery.update({
+        where: { id: deliveryId },
+        data: { status: 'FAILED', failedAt, failureReason: reason, otpCode: null, otpExpiresAt: null },
+      });
+    });
   }
 }

@@ -5,6 +5,7 @@ import {
   Get,
   Headers,
   HttpCode,
+  NotFoundException,
   Post,
   Query,
   Req,
@@ -81,6 +82,28 @@ export class CheckoutController {
     const order = await this.checkoutService.verifyPayment(id, req.user?.id, this.guestCartId(req), dto);
     // The cart this checkout came from is now CONVERTED — clear the guest
     // cookie the same way login does, so a fresh visit starts a fresh cart.
+    if (!req.user) {
+      res.clearCookie(GUEST_CART_COOKIE);
+    }
+    return order;
+  }
+
+  // Dev-only convenience — 404s in production so it's not even discoverable
+  // (not a real payment method; see CheckoutService.devCompletePayment).
+  @Post('payment/dev-complete')
+  @HttpCode(200)
+  async devCompletePayment(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+    @Query('id') id: string | undefined,
+  ) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new NotFoundException();
+    }
+    if (!id) {
+      throw new BadRequestException('id is required');
+    }
+    const order = await this.checkoutService.devCompletePayment(id, req.user?.id, this.guestCartId(req));
     if (!req.user) {
       res.clearCookie(GUEST_CART_COOKIE);
     }

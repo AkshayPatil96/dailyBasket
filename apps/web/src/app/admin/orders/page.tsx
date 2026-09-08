@@ -4,13 +4,14 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef, PaginationState, SortingState } from '@tanstack/react-table';
-import { ArrowRight, Eye } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import type { Order, OrderStatus } from '@grocery-delivery/types';
 import { adminOrdersApi } from '@/lib/admin-orders-api';
 import { getApiErrorMessage } from '@/lib/api-client';
 import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
+import { DELIVERY_FAILURE_REASON_LABEL, DELIVERY_REJECTION_REASON_LABEL } from '@/lib/delivery-status';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
@@ -107,13 +108,35 @@ export default function AdminOrdersPage() {
         accessorKey: 'status',
         header: 'Status',
         enableSorting: false,
-        cell: ({ row }) => (
-          <span
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${ORDER_STATUS_BADGE_CLASS[row.original.status]}`}
-          >
-            {ORDER_STATUS_LABEL[row.original.status]}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const delivery = row.original.delivery;
+          // Order.status alone doesn't surface a rejected/failed delivery —
+          // both leave the order's own status untouched (REJECTED happens
+          // before pickup, order stays PACKED; FAILED happens after, order
+          // stays OUT_FOR_DELIVERY), so without this the row looks routine
+          // even though it needs admin attention (see order-detail.tsx's
+          // Retry/Cancel actions).
+          const attentionReason =
+            delivery?.status === 'REJECTED' && delivery.rejectionReason
+              ? `Delivery rejected: ${DELIVERY_REJECTION_REASON_LABEL[delivery.rejectionReason]}`
+              : delivery?.status === 'FAILED' && delivery.failureReason
+                ? `Delivery failed: ${DELIVERY_FAILURE_REASON_LABEL[delivery.failureReason]}`
+                : null;
+          return (
+            <span className="flex items-center gap-1.5">
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${ORDER_STATUS_BADGE_CLASS[row.original.status]}`}
+              >
+                {ORDER_STATUS_LABEL[row.original.status]}
+              </span>
+              {attentionReason ? (
+                <span title={attentionReason}>
+                  <AlertTriangle className="size-4 shrink-0 text-(--color-destructive)" aria-hidden />
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         accessorKey: 'createdAt',

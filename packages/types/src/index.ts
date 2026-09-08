@@ -274,6 +274,8 @@ export type DeliveryFailureReason =
   | 'UNABLE_TO_CONTACT'
   | 'OTHER';
 export type DeliveryAssignmentOutcome = 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REASSIGNED' | 'EXPIRED';
+/** Distinct from DeliveryFailureReason — declining an assignment, not failing after accepting it. */
+export type DeliveryRejectionReason = 'TOO_FAR' | 'ALREADY_BUSY' | 'VEHICLE_ISSUE' | 'OTHER';
 
 export type OrderEventType =
   | 'ORDER_PLACED'
@@ -300,6 +302,8 @@ export interface Delivery {
   otpCode?: string | null;
   otpExpiresAt?: string | null;
   failureReason?: DeliveryFailureReason | null;
+  rejectionReason?: DeliveryRejectionReason | null;
+  rejectionNote?: string | null;
   assignedAt?: string | null;
   acceptedAt?: string | null;
   pickedUpAt?: string | null;
@@ -340,6 +344,14 @@ export interface DeliveryAssignment {
   outcome: DeliveryAssignmentOutcome;
   assignedAt: string;
   respondedAt?: string | null;
+  /** This attempt's own lifecycle — distinct from Delivery's shared/current-only copies. */
+  pickedUpAt?: string | null;
+  outForDeliveryAt?: string | null;
+  deliveredAt?: string | null;
+  failedAt?: string | null;
+  failureReason?: DeliveryFailureReason | null;
+  rejectionReason?: DeliveryRejectionReason | null;
+  rejectionNote?: string | null;
 }
 
 export interface DeliveryOrderSummary {
@@ -361,7 +373,7 @@ export interface UnassignedDelivery {
   order: DeliveryOrderSummary;
 }
 
-/** GET /delivery/admin/list — the full operational view, every delivery. */
+/** Backing GET /delivery/admin?id= (a single Delivery's full current state). */
 export interface DeliveryListItem extends Delivery {
   order: DeliveryOrderSummary;
 }
@@ -370,7 +382,46 @@ export interface DeliveryListItem extends Delivery {
 export interface DeliveryDetail extends DeliveryListItem {
   assignments: (DeliveryAssignment & {
     deliveryPartner: { user: Pick<User, 'firstName' | 'lastName'> };
+    /** This attempt's own status, same derivation as AdminDeliveryAssignmentListItem — see ?assignment= viewing on the detail page. */
+    displayStatus: AdminDeliveryAssignmentStatus;
   })[];
+}
+
+/**
+ * GET /delivery/admin/list — one row per DeliveryAssignment attempt, not per
+ * Delivery: a rejected-then-retried order shows both its failed attempt and
+ * its eventual success as separate rows (mirrors PartnerHistoryDelivery's
+ * shape/reasoning — see myHistory()). `displayStatus` is fully derived
+ * server-side from the assignment's own fields, independent of Delivery's
+ * shared/current-only status.
+ */
+export type AdminDeliveryAssignmentStatus =
+  | 'ASSIGNED'
+  | 'ACCEPTED'
+  | 'PICKED_UP'
+  | 'OUT_FOR_DELIVERY'
+  | 'DELIVERED'
+  | 'REJECTED'
+  | 'EXPIRED'
+  | 'FAILED'
+  | 'REASSIGNED';
+
+export interface AdminDeliveryAssignmentListItem {
+  id: string;
+  deliveryId: string;
+  order: DeliveryOrderSummary;
+  deliveryPartner: { user: Pick<User, 'id' | 'firstName' | 'lastName' | 'phone'> };
+  outcome: DeliveryAssignmentOutcome;
+  displayStatus: AdminDeliveryAssignmentStatus;
+  assignedAt: string;
+  respondedAt?: string | null;
+  pickedUpAt?: string | null;
+  outForDeliveryAt?: string | null;
+  deliveredAt?: string | null;
+  failedAt?: string | null;
+  failureReason?: DeliveryFailureReason | null;
+  rejectionReason?: DeliveryRejectionReason | null;
+  rejectionNote?: string | null;
 }
 
 /** GET /delivery/my/active — full order (items, payment status) for fulfilling the delivery. */
@@ -386,15 +437,34 @@ export interface PartnerActiveDelivery extends Omit<Delivery, 'otpCode'> {
 
 /**
  * GET /delivery/my/history — a past delivery plus how it ended for this
- * partner. delivery.id/status/timestamps reflect the Delivery's *current*
- * state, which is shared across every assignment attempt on it — use the
- * assignment* fields (unique per row) for the key, outcome, and "when".
+ * partner. Delivery's own status/lifecycle fields are omitted entirely
+ * (they're shared across every assignment attempt and only ever reflect the
+ * *current* one) — every assignment* field below is this attempt's own.
  */
-export interface PartnerHistoryDelivery extends Omit<DeliveryListItem, 'otpCode'> {
+export interface PartnerHistoryDelivery
+  extends Omit<
+    DeliveryListItem,
+    | 'otpCode'
+    | 'status'
+    | 'pickedUpAt'
+    | 'outForDeliveryAt'
+    | 'deliveredAt'
+    | 'failedAt'
+    | 'failureReason'
+    | 'rejectionReason'
+    | 'rejectionNote'
+  > {
   assignmentId: string;
   assignmentOutcome: DeliveryAssignmentOutcome;
   assignmentAssignedAt: string;
   assignmentRespondedAt?: string | null;
+  assignmentPickedUpAt?: string | null;
+  assignmentOutForDeliveryAt?: string | null;
+  assignmentDeliveredAt?: string | null;
+  assignmentFailedAt?: string | null;
+  assignmentFailureReason?: DeliveryFailureReason | null;
+  assignmentRejectionReason?: DeliveryRejectionReason | null;
+  assignmentRejectionNote?: string | null;
 }
 
 export interface OrderEvent {

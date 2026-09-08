@@ -3,12 +3,7 @@
 import { Loader2, Package } from 'lucide-react';
 import { formatDate } from '@grocery-delivery/utils';
 import { useDeliveryHistory } from '@/hooks/use-delivery';
-import {
-  ASSIGNMENT_OUTCOME_BADGE_CLASS,
-  ASSIGNMENT_OUTCOME_LABEL,
-  DELIVERY_STATUS_BADGE_CLASS,
-  DELIVERY_STATUS_LABEL,
-} from '@/lib/delivery-status';
+import { ASSIGNMENT_OUTCOME_BADGE_CLASS, ASSIGNMENT_OUTCOME_LABEL, DELIVERY_STATUS_BADGE_CLASS, DELIVERY_STATUS_LABEL } from '@/lib/delivery-status';
 
 export default function DeliveryHistoryPage() {
   const { data: history, isLoading } = useDeliveryHistory(true);
@@ -29,19 +24,25 @@ export default function DeliveryHistoryPage() {
       ) : (
         <div className="flex flex-col gap-2">
           {history.map((entry) => {
-            // The same Delivery can appear once per assignment attempt
-            // (reassigned-then-retried), so delivery.status/timestamps are
-            // shared across rows — only meaningful for the ACCEPTED row
-            // (the one that actually went on to a terminal outcome).
-            // REJECTED/EXPIRED rows show the assignment's own outcome
-            // instead, at the time that attempt was resolved.
+            // Every field driving this row is the assignment's own — an
+            // ACCEPTED attempt still needs its own outcome derived from
+            // which of assignmentDeliveredAt/assignmentFailedAt got set,
+            // since Delivery's shared status only reflects whichever
+            // attempt is current now (irrelevant to a past one here).
             const wasAccepted = entry.assignmentOutcome === 'ACCEPTED';
-            const label = wasAccepted ? DELIVERY_STATUS_LABEL[entry.status] : ASSIGNMENT_OUTCOME_LABEL[entry.assignmentOutcome];
-            const badgeClass = wasAccepted
-              ? DELIVERY_STATUS_BADGE_CLASS[entry.status]
+            const acceptedStatus: 'DELIVERED' | 'FAILED' | null = wasAccepted
+              ? entry.assignmentDeliveredAt
+                ? 'DELIVERED'
+                : entry.assignmentFailedAt
+                  ? 'FAILED'
+                  : null
+              : null;
+            const label = acceptedStatus ? DELIVERY_STATUS_LABEL[acceptedStatus] : ASSIGNMENT_OUTCOME_LABEL[entry.assignmentOutcome];
+            const badgeClass = acceptedStatus
+              ? DELIVERY_STATUS_BADGE_CLASS[acceptedStatus]
               : ASSIGNMENT_OUTCOME_BADGE_CLASS[entry.assignmentOutcome];
             const when = wasAccepted
-              ? (entry.deliveredAt ?? entry.failedAt ?? entry.assignmentRespondedAt ?? entry.assignmentAssignedAt)
+              ? (entry.assignmentDeliveredAt ?? entry.assignmentFailedAt ?? entry.assignmentRespondedAt ?? entry.assignmentAssignedAt)
               : (entry.assignmentRespondedAt ?? entry.assignmentAssignedAt);
 
             return (

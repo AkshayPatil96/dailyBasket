@@ -5,19 +5,27 @@ import { Clock, Loader2, MapPin, Package, Phone, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCurrency } from '@grocery-delivery/utils';
 import { useMyDeliveryPartnerProfile, useSetAvailability } from '@/hooks/use-delivery-partner';
+import type { DeliveryFailureReason, DeliveryRejectionReason } from '@grocery-delivery/types';
 import {
   useAcceptDelivery,
   useActiveDelivery,
   useCompleteDelivery,
   useDeliveryHistory,
+  useFailDelivery,
   usePickupDelivery,
   useRejectDelivery,
   useStartDelivery,
 } from '@/hooks/use-delivery';
 import { getApiErrorMessage } from '@/lib/api-client';
-import { DELIVERY_STATUS_BADGE_CLASS, DELIVERY_STATUS_LABEL } from '@/lib/delivery-status';
+import {
+  DELIVERY_FAILURE_REASON_LABEL,
+  DELIVERY_REJECTION_REASON_LABEL,
+  DELIVERY_STATUS_BADGE_CLASS,
+  DELIVERY_STATUS_LABEL,
+} from '@/lib/delivery-status';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
+import { Textarea } from '@/components/ui/textarea';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,6 +37,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+
+const FAILURE_REASONS = Object.keys(DELIVERY_FAILURE_REASON_LABEL) as DeliveryFailureReason[];
+const REJECTION_REASONS = Object.keys(DELIVERY_REJECTION_REASON_LABEL) as DeliveryRejectionReason[];
 
 const ACCOUNT_STATUS_LABEL: Record<string, string> = {
   PENDING_APPROVAL: 'Your account is awaiting admin approval.',
@@ -75,13 +86,18 @@ export default function DeliveryHomePage() {
   const { data: active, isLoading: isLoadingActive } = useActiveDelivery();
   const { data: history } = useDeliveryHistory(true);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [showFailDialog, setShowFailDialog] = useState(false);
   const [otpInput, setOtpInput] = useState('');
+  const [failReason, setFailReason] = useState<DeliveryFailureReason>('CUSTOMER_UNAVAILABLE');
+  const [rejectReason, setRejectReason] = useState<DeliveryRejectionReason>('TOO_FAR');
+  const [rejectNote, setRejectNote] = useState('');
 
   const acceptMutation = useAcceptDelivery();
   const rejectMutation = useRejectDelivery();
   const pickupMutation = usePickupDelivery();
   const startMutation = useStartDelivery();
   const completeMutation = useCompleteDelivery();
+  const failMutation = useFailDelivery();
 
   if (isLoading) {
     return (
@@ -116,15 +132,15 @@ export default function DeliveryHomePage() {
 
   const onActionError = (err: unknown) => toast.error(getApiErrorMessage(err, 'Could not update the delivery.'));
 
-  // Must gate on assignmentOutcome === 'ACCEPTED', not just entry.status —
-  // a reassigned delivery has one history row per attempt, all sharing the
-  // same (current) delivery.status/deliveredAt, so checking those alone
-  // would count the same completed delivery once per missed/rejected
-  // attempt too (see myHistory()'s comment on this).
+  // Gate on assignmentDeliveredAt, this attempt's own terminal timestamp —
+  // not Delivery's shared status/deliveredAt, which only ever reflects
+  // whichever attempt is current (a failed-then-retried delivery would
+  // otherwise count once per attempt, or not count the failed one as
+  // distinct from the eventual success — see myHistory()'s comment).
   const today = new Date().toDateString();
-  const completedDeliveries = history?.filter((d) => d.assignmentOutcome === 'ACCEPTED' && d.status === 'DELIVERED') ?? [];
+  const completedDeliveries = history?.filter((d) => d.assignmentOutcome === 'ACCEPTED' && d.assignmentDeliveredAt) ?? [];
   const completedToday = completedDeliveries.filter(
-    (d) => d.deliveredAt && new Date(d.deliveredAt).toDateString() === today,
+    (d) => d.assignmentDeliveredAt && new Date(d.assignmentDeliveredAt).toDateString() === today,
   ).length;
   const completedTotal = completedDeliveries.length;
 
@@ -319,11 +335,24 @@ export default function DeliveryHomePage() {
                       Complete
                     </Button>
                   </div>
+                  <button
+                    type="button"
+                    className="self-start text-xs font-medium text-(--color-destructive) underline-offset-2 hover:underline"
+                    onClick={() => setShowFailDialog(true)}
+                  >
+                    Report a problem with this delivery
+                  </button>
                 </form>
               ) : null}
             </div>
 
-            <AlertDialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+            <AlertDialog
+              open={showRejectDialog}
+              onOpenChange={(open) => {
+                setShowRejectDialog(open);
+                if (!open) setRejectNote('');
+              }}
+            >
               <AlertDialogContent>
                 <AlertDialogHeader>
                   <AlertDialogTitle>Reject this delivery?</AlertDialogTitle>
@@ -331,18 +360,97 @@ export default function DeliveryHomePage() {
                     It goes back to the admin to reassign. You&apos;ll be available for new deliveries again.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+                <div className="flex flex-col gap-1.5">
+                  {REJECTION_REASONS.map((reason) => (
+                    <label
+                      key={reason}
+                      className="flex items-center gap-2 rounded-(--radius-outer) border border-(--color-border) p-2.5 text-sm has-checked:border-(--color-primary)"
+                    >
+                      <input
+                        type="radio"
+                        name="rejectReason"
+                        value={reason}
+                        checked={rejectReason === reason}
+                        onChange={() => setRejectReason(reason)}
+                      />
+                      {DELIVERY_REJECTION_REASON_LABEL[reason]}
+                    </label>
+                  ))}
+                </div>
+                {rejectReason === 'OTHER' ? (
+                  <Textarea
+                    placeholder="What's the reason?"
+                    value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                  />
+                ) : null}
                 <AlertDialogFooter>
                   <AlertDialogCancel>Keep it</AlertDialogCancel>
                   <AlertDialogAction
-                    disabled={rejectMutation.isPending}
+                    disabled={rejectMutation.isPending || (rejectReason === 'OTHER' && !rejectNote.trim())}
                     onClick={() =>
-                      rejectMutation.mutate(active.id, {
-                        onError: onActionError,
-                        onSuccess: () => setShowRejectDialog(false),
-                      })
+                      rejectMutation.mutate(
+                        { deliveryId: active.id, reason: rejectReason, note: rejectNote.trim() || undefined },
+                        {
+                          onError: onActionError,
+                          onSuccess: () => {
+                            setShowRejectDialog(false);
+                            setRejectNote('');
+                          },
+                        },
+                      )
                     }
                   >
                     Reject delivery
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={showFailDialog} onOpenChange={setShowFailDialog}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Report a delivery problem</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This goes to the admin for review — they&apos;ll retry, reassign, or cancel the order.
+                    You&apos;ll be available for new deliveries again.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <div className="flex flex-col gap-1.5">
+                  {FAILURE_REASONS.map((reason) => (
+                    <label
+                      key={reason}
+                      className="flex items-center gap-2 rounded-(--radius-outer) border border-(--color-border) p-2.5 text-sm has-checked:border-(--color-primary)"
+                    >
+                      <input
+                        type="radio"
+                        name="failReason"
+                        value={reason}
+                        checked={failReason === reason}
+                        onChange={() => setFailReason(reason)}
+                      />
+                      {DELIVERY_FAILURE_REASON_LABEL[reason]}
+                    </label>
+                  ))}
+                </div>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    disabled={failMutation.isPending}
+                    onClick={() =>
+                      failMutation.mutate(
+                        { deliveryId: active.id, reason: failReason },
+                        {
+                          onError: onActionError,
+                          onSuccess: () => {
+                            setShowFailDialog(false);
+                            toast.success('Reported — admin will review this delivery.');
+                          },
+                        },
+                      )
+                    }
+                  >
+                    Submit report
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>

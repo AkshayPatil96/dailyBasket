@@ -1,4 +1,10 @@
-import type { Delivery, PartnerActiveDelivery, PartnerHistoryDelivery } from '@grocery-delivery/types';
+import type {
+  Delivery,
+  DeliveryFailureReason,
+  DeliveryRejectionReason,
+  PartnerActiveDelivery,
+  PartnerHistoryDelivery,
+} from '@grocery-delivery/types';
 import { apiClient } from './api-client';
 
 // Partner-facing /delivery/my/* — distinct from admin-deliveries-api.ts's
@@ -13,8 +19,8 @@ export const deliveryApi = {
   accept: (deliveryId: string) =>
     apiClient.post<Delivery>(`/delivery/my/accept?id=${deliveryId}`).then((res) => res.data),
 
-  reject: (deliveryId: string) =>
-    apiClient.post<Delivery>(`/delivery/my/reject?id=${deliveryId}`).then((res) => res.data),
+  reject: (deliveryId: string, reason: DeliveryRejectionReason, note?: string) =>
+    apiClient.post<Delivery>(`/delivery/my/reject?id=${deliveryId}`, { reason, note }).then((res) => res.data),
 
   pickup: (deliveryId: string) =>
     apiClient.post<Delivery>(`/delivery/my/pickup?id=${deliveryId}`).then((res) => res.data),
@@ -24,4 +30,7 @@ export const deliveryApi = {
 
   complete: (deliveryId: string, otpCode: string) =>
     apiClient.post<Delivery>(`/delivery/my/complete?id=${deliveryId}`, { otpCode }).then((res) => res.data),
+
+  fail: (deliveryId: string, reason: DeliveryFailureReason) =>
+    apiClient.post<Delivery>(`/delivery/my/fail?id=${deliveryId}`, { reason }).then((res) => res.data),
 };

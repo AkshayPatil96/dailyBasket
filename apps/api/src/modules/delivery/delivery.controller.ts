@@ -1,26 +1,27 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import type { DeliveryStatus } from '@prisma/client';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../common/types/authenticated-request';
 import { DeliveryPartnersService } from '../delivery-partners/delivery-partners.service';
-import { DeliveryService } from './delivery.service';
+import { DeliveryService, type AdminDeliveryAssignmentStatus } from './delivery.service';
 import { AssignDeliveryDto } from './dto/assign-delivery.dto';
 import { CompleteDeliveryDto } from './dto/complete-delivery.dto';
+import { FailDeliveryDto } from './dto/fail-delivery.dto';
+import { RejectDeliveryDto } from './dto/reject-delivery.dto';
 
-const VALID_DELIVERY_STATUSES: DeliveryStatus[] = [
-  'PENDING_ASSIGNMENT',
+const VALID_ASSIGNMENT_DISPLAY_STATUSES: AdminDeliveryAssignmentStatus[] = [
   'ASSIGNED',
   'ACCEPTED',
   'PICKED_UP',
   'OUT_FOR_DELIVERY',
   'DELIVERED',
   'REJECTED',
-  'CANCELLED',
+  'EXPIRED',
   'FAILED',
+  'REASSIGNED',
 ];
 
 @Controller('delivery')
@@ -34,10 +35,10 @@ export class DeliveryController {
   @Get('admin/list')
   @Roles('ADMIN')
   async adminList(@Query('status') status: string | undefined) {
-    if (status && !VALID_DELIVERY_STATUSES.includes(status as DeliveryStatus)) {
+    if (status && !VALID_ASSIGNMENT_DISPLAY_STATUSES.includes(status as AdminDeliveryAssignmentStatus)) {
       throw new BadRequestException('Invalid status filter');
     }
-    return this.deliveryService.adminList(status as DeliveryStatus | undefined);
+    return this.deliveryService.adminList(status as AdminDeliveryAssignmentStatus | undefined);
   }
 
   @Get('admin')
@@ -99,12 +100,16 @@ export class DeliveryController {
   @Post('my/reject')
   @HttpCode(200)
   @Roles('DELIVERY_PARTNER')
-  async myReject(@CurrentUser() user: AuthenticatedUser, @Query('id') deliveryId: string | undefined) {
+  async myReject(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('id') deliveryId: string | undefined,
+    @Body() dto: RejectDeliveryDto,
+  ) {
     if (!deliveryId) {
       throw new BadRequestException('id is required');
     }
     const partner = await this.deliveryPartnersService.getByUserId(user.id);
-    return this.deliveryService.myReject(partner.id, deliveryId);
+    return this.deliveryService.myReject(partner.id, deliveryId, dto.reason, dto.note);
   }
 
   @Post('my/pickup')
@@ -145,5 +150,20 @@ export class DeliveryController {
     }
     const partner = await this.deliveryPartnersService.getByUserId(user.id);
     return this.deliveryService.myComplete(partner.id, deliveryId, dto.otpCode);
+  }
+
+  @Post('my/fail')
+  @HttpCode(200)
+  @Roles('DELIVERY_PARTNER')
+  async myFail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('id') deliveryId: string | undefined,
+    @Body() dto: FailDeliveryDto,
+  ) {
+    if (!deliveryId) {
+      throw new BadRequestException('id is required');
+    }
+    const partner = await this.deliveryPartnersService.getByUserId(user.id);
+    return this.deliveryService.myFail(partner.id, deliveryId, dto.reason);
   }
 }

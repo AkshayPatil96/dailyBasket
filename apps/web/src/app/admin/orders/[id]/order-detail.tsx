@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Loader2, Package } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2, Package } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatCurrency } from '@grocery-delivery/utils';
+import { formatCurrency, formatDate } from '@grocery-delivery/utils';
 import type { OrderStatus } from '@grocery-delivery/types';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -13,7 +13,9 @@ import { OrderTimeline } from '@/components/orders/order-timeline';
 import { AssignPartnerPicker } from '@/components/admin/assign-partner-picker';
 import { getApiErrorMessage } from '@/lib/api-client';
 import { adminOrdersApi } from '@/lib/admin-orders-api';
+import { adminDeliveriesApi } from '@/lib/admin-deliveries-api';
 import { ORDER_STATUS_BADGE_CLASS, ORDER_STATUS_LABEL } from '@/lib/order-status';
+import { ASSIGNMENT_OUTCOME_LABEL, RETRYABLE_DELIVERY_STATUSES } from '@/lib/delivery-status';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,6 +64,19 @@ export function OrderDetail({ orderId }: { orderId: string }) {
     queryFn: () => adminOrdersApi.get(orderId),
   });
 
+  // Same query key delivery-detail.tsx uses for the same delivery — shares
+  // its cache entry rather than duplicating a fetch when both pages are
+  // visited. Assignment history moved here (see order-detail vs.
+  // deliveries-detail split in dailybasket-delivery-partner-operations.md) —
+  // deliveries pages are a flat audit list/single-delivery view, checking one
+  // order's full history is an order-level concern.
+  const deliveryId = order?.delivery?.id;
+  const { data: deliveryDetail } = useQuery({
+    queryKey: ['admin', 'deliveries', deliveryId],
+    queryFn: () => adminDeliveriesApi.get(deliveryId!),
+    enabled: !!deliveryId,
+  });
+
   const invalidateLists = () => queryClient.invalidateQueries({ queryKey: ['admin', 'orders'] });
 
   const advanceMutation = useMutation({
@@ -99,9 +114,20 @@ export function OrderDetail({ orderId }: { orderId: string }) {
   }
 
   const nextStatus = NEXT_STATUS[order.status];
+  // A Delivery row exists from the moment the order is placed (well before
+  // PACKED), so we don't show this panel until there's something to act on
+  // or report — either the order's ready for assignment, or the delivery
+  // already has a real history (assigned/accepted/rejected/etc).
+  const showDeliveryPanel =
+    !!order.delivery && (order.status === 'PACKED' || order.delivery.status !== 'PENDING_ASSIGNMENT');
+  const canAssignOrRetry =
+    !!order.delivery &&
+    ((order.status === 'PACKED' && order.delivery.status === 'PENDING_ASSIGNMENT') ||
+      RETRYABLE_DELIVERY_STATUSES.includes(order.delivery.status));
+  const isFailedDelivery = order.delivery?.status === 'FAILED';
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <div className="flex flex-col gap-6">
       <Link
         href="/admin/orders"
         className="flex items-center gap-1.5 text-sm text-(--color-muted-foreground) hover:text-(--color-foreground)"
@@ -142,35 +168,42 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         </div>
       ) : null}
 
-      {order.status === 'PACKED' && order.delivery ? (
-        <div className="flex items-center justify-between gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
-          {order.delivery.status === 'PENDING_ASSIGNMENT' ? (
-            <>
-              <p className="text-sm text-(--color-muted-foreground)">Ready for delivery — no partner assigned yet.</p>
-              <Button size="sm" onClick={() => setShowAssignDialog(true)}>
-                Assign delivery
-              </Button>
-            </>
-          ) : (
-            <>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium text-(--color-foreground)">
-                  {DELIVERY_STATUS_LABEL[order.delivery.status] ?? order.delivery.status}
+      {showDeliveryPanel ? (
+        <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-(--color-foreground)">
+                {DELIVERY_STATUS_LABEL[order.delivery!.status] ?? order.delivery!.status}
+              </span>
+              {order.delivery!.deliveryPartner?.user ? (
+                <span className="text-xs text-(--color-muted-foreground)">
+                  {order.delivery!.deliveryPartner.user.firstName} {order.delivery!.deliveryPartner.user.lastName}
                 </span>
-                {order.delivery.deliveryPartner?.user ? (
-                  <span className="text-xs text-(--color-muted-foreground)">
-                    {order.delivery.deliveryPartner.user.firstName} {order.delivery.deliveryPartner.user.lastName}
-                  </span>
-                ) : null}
-              </div>
-              <Link
-                href={`/admin/deliveries/${order.delivery.id}`}
-                className="text-sm font-medium text-(--color-primary) hover:underline"
-              >
-                View delivery
-              </Link>
-            </>
-          )}
+              ) : order.delivery!.status === 'PENDING_ASSIGNMENT' ? (
+                <span className="text-xs text-(--color-muted-foreground)">No partner assigned yet.</span>
+              ) : null}
+            </div>
+            <Link
+              href={`/admin/deliveries/${order.delivery!.id}`}
+              className="text-sm font-medium text-(--color-primary) hover:underline"
+            >
+              View delivery
+            </Link>
+          </div>
+          {canAssignOrRetry || isFailedDelivery ? (
+            <div className="flex gap-2">
+              {canAssignOrRetry ? (
+                <Button size="sm" onClick={() => setShowAssignDialog(true)}>
+                  {order.delivery!.status === 'PENDING_ASSIGNMENT' ? 'Assign delivery' : 'Retry — reassign'}
+                </Button>
+              ) : null}
+              {isFailedDelivery ? (
+                <Button size="sm" variant="outline" onClick={() => setShowCancelDialog(true)}>
+                  Cancel order
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -178,7 +211,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
         <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Assign a delivery partner</DialogTitle>
+              <DialogTitle>
+                {order.delivery?.status === 'PENDING_ASSIGNMENT' ? 'Assign a delivery partner' : 'Reassign to a new partner'}
+              </DialogTitle>
             </DialogHeader>
             <AssignPartnerPicker
               deliveryId={order.delivery.id}
@@ -189,6 +224,49 @@ export function OrderDetail({ orderId }: { orderId: string }) {
             />
           </DialogContent>
         </Dialog>
+      ) : null}
+
+      {deliveryDetail && deliveryDetail.assignments.length > 0 ? (
+        <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
+          <h2 className="text-sm font-semibold text-(--color-foreground)">Assignment history</h2>
+          <ul className="flex flex-col gap-2 text-sm">
+            {deliveryDetail.assignments.map((assignment) => {
+              // An ACCEPTED row can still have gone on to fail under this
+              // partner — surface that here since it's this attempt's own
+              // outcome, not visible from Delivery's current (possibly
+              // later-reassigned) status/failureReason anymore.
+              const outcomeLabel =
+                assignment.outcome === 'ACCEPTED' && assignment.failedAt
+                  ? `Failed — ${assignment.failureReason?.replace(/_/g, ' ').toLowerCase() ?? 'unknown reason'}`
+                  : assignment.outcome === 'REJECTED'
+                    ? `Rejected — ${
+                        assignment.rejectionReason === 'OTHER' && assignment.rejectionNote
+                          ? assignment.rejectionNote
+                          : (assignment.rejectionReason?.replace(/_/g, ' ').toLowerCase() ?? 'no reason given')
+                      }`
+                    : ASSIGNMENT_OUTCOME_LABEL[assignment.outcome];
+              const when = assignment.failedAt ?? assignment.deliveredAt ?? assignment.respondedAt ?? assignment.assignedAt;
+              return (
+                <li key={assignment.id} className="flex items-center justify-between gap-4">
+                  <span className="text-(--color-foreground)">
+                    {assignment.deliveryPartner.user.firstName} {assignment.deliveryPartner.user.lastName}
+                  </span>
+                  <span className="flex items-center gap-2 text-(--color-muted-foreground)">
+                    {outcomeLabel} · {formatDate(when)}
+                    <Link
+                      href={`/admin/deliveries/${deliveryDetail.id}?assignment=${assignment.id}`}
+                      title="View this attempt's details"
+                      className="flex size-6 shrink-0 items-center justify-center rounded-(--radius-inner) text-(--color-muted-foreground) hover:bg-(--color-muted) hover:text-(--color-foreground)"
+                    >
+                      <Eye className="size-3.5" aria-hidden />
+                      <span className="sr-only">View delivery details</span>
+                    </Link>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-3 rounded-(--radius-outer) border border-(--color-border) bg-(--color-card) p-4">
@@ -262,7 +340,9 @@ export function OrderDetail({ orderId }: { orderId: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this order?</AlertDialogTitle>
             <AlertDialogDescription>
-              Reserved stock will be returned to inventory. This cannot be undone.
+              {isFailedDelivery
+                ? "The delivery failed and won't be retried. This cannot be undone."
+                : 'Reserved stock will be returned to inventory. This cannot be undone.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Textarea

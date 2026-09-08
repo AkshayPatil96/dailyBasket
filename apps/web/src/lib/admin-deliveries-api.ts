@@ -1,17 +1,17 @@
 import type {
+  AdminDeliveryAssignmentListItem,
+  AdminDeliveryAssignmentStatus,
   Delivery,
   DeliveryDetail,
-  DeliveryListItem,
   DeliveryPartner,
-  DeliveryStatus,
   UnassignedDelivery,
 } from '@grocery-delivery/types';
 import { apiClient } from './api-client';
 
 export const adminDeliveriesApi = {
-  list: (status?: DeliveryStatus) =>
+  list: (status?: AdminDeliveryAssignmentStatus) =>
     apiClient
-      .get<DeliveryListItem[]>('/delivery/admin/list', { params: status ? { status } : undefined })
+      .get<AdminDeliveryAssignmentListItem[]>('/delivery/admin/list', { params: status ? { status } : undefined })
       .then((res) => res.data),
 
   get: (id: string) => apiClient.get<DeliveryDetail>(`/delivery/admin?id=${id}`).then((res) => res.data),

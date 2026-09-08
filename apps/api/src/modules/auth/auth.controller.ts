@@ -130,11 +130,12 @@ export class AuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
   async resendVerification(@Body() dto: EmailOnlyDto) {
-    await this.authService.resendVerification(dto.email);
+    const verifyUrl = await this.authService.resendVerification(dto.email);
     return {
       success: true,
       message:
         'If that email is registered, a verification link has been sent.',
+      ...(verifyUrl ? { verifyUrl } : null), // Only include verifyUrl in development/test environments
     };
   }
 
@@ -218,7 +219,11 @@ export class AuthController {
   // Folds a guest cart (if any) into the now-authenticated user's cart, then
   // clears the guest cookie — the guest cart is MERGED, not deleted, but the
   // cookie no longer needs to reference it.
-  private async mergeGuestCart(req: Request, res: Response, userId: string): Promise<void> {
+  private async mergeGuestCart(
+    req: Request,
+    res: Response,
+    userId: string,
+  ): Promise<void> {
     const guestCartId = req.cookies?.[GUEST_CART_COOKIE] as string | undefined;
     if (!guestCartId) {
       return;

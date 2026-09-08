@@ -201,7 +201,10 @@ export class AuthService {
     return toSafeUser(user);
   }
 
-  async updateProfile(userId: string, dto: { firstName?: string; lastName?: string; phone?: string }) {
+  async updateProfile(
+    userId: string,
+    dto: { firstName?: string; lastName?: string; phone?: string },
+  ) {
     const user = await this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -242,7 +245,7 @@ export class AuthService {
     await this.linkGuestOrders(user.id, user.email);
   }
 
-  async resendVerification(email: string): Promise<void> {
+  async resendVerification(email: string): Promise<string | void> {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (user && !user.emailVerifiedAt && !user.deletedAt) {
       const lastToken = await this.prisma.emailVerificationToken.findFirst({
@@ -251,12 +254,13 @@ export class AuthService {
       });
       const cooledDown =
         !lastToken ||
-        Date.now() - lastToken.createdAt.getTime() >= RESEND_VERIFICATION_COOLDOWN_MS;
+        Date.now() - lastToken.createdAt.getTime() >=
+          RESEND_VERIFICATION_COOLDOWN_MS;
       // Silently skips instead of throwing — the response must stay identical
       // to the "not found"/"already verified" cases below, or a rapid
       // double-click would leak "this email exists" via a different error.
       if (cooledDown) {
-        await this.issueEmailVerificationToken(
+        return await this.issueEmailVerificationToken(
           user.id,
           user.email,
           user.firstName,
@@ -353,7 +357,7 @@ export class AuthService {
     userId: string,
     email: string,
     firstName: string,
-  ): Promise<void> {
+  ): Promise<string | void> {
     const rawToken = generateToken();
     await this.prisma.emailVerificationToken.create({
       data: {
@@ -364,5 +368,10 @@ export class AuthService {
     });
     const verifyUrl = `${this.configService.getOrThrow<string>('app.appUrl')}/verify-email?token=${rawToken}`;
     await this.emailService.sendVerificationEmail(email, firstName, verifyUrl);
+
+    const env = this.configService.getOrThrow<string>('app.nodeEnv');
+    if (env === 'development' || env === 'test') {
+      return verifyUrl;
+    }
   }
 }
